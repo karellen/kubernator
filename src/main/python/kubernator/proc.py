@@ -21,13 +21,19 @@ __all__ = ["run"]
 logger = logging.getLogger("kubernator.proc")
 
 
-def stream_writer_buf(pipe: BinaryIO, source_func):
-    for buf in source_func():
-        pipe.write(buf)
+def stream_writer_buf(pipe: BinaryIO, source):
+    if isinstance(source, Callable):
+        for buf in source():
+            pipe.write(buf)
+    else:
+        pipe.write(source)
 
 
-def stream_writer_line(pipe: TextIO, source_func):
-    pipe.writelines(source_func())
+def stream_writer_text(pipe: TextIO, source):
+    if isinstance(source, Callable):
+        pipe.writelines(source())
+    else:
+        pipe.write(source)
 
 
 def stream_reader_buf(pipe: BinaryIO, sink_func):
@@ -45,7 +51,7 @@ class ProcessRunner:
     def __init__(self, args,
                  stdout: Union[None, int, IO, Callable[[AnyStr], None]],
                  stderr: Union[None, int, IO, Callable[[AnyStr], None]],
-                 stdin: Union[None, int, IO, Callable[[], Iterable[AnyStr]]] = DEVNULL,
+                 stdin: Union[None, int, bytes, str, IO, Callable[[], Iterable[AnyStr]]] = DEVNULL,
                  *,
                  safe_args=None, universal_newlines=True, **kwargs):
         self._safe_args = safe_args or args
@@ -53,7 +59,9 @@ class ProcessRunner:
         self._proc = Popen(args,
                            stdout=PIPE if isinstance(stdout, Callable) else (stdout if stdout is not None else DEVNULL),
                            stderr=PIPE if isinstance(stderr, Callable) else (stderr if stderr is not None else DEVNULL),
-                           stdin=PIPE if isinstance(stderr, Callable) else (stdin if stdin is not None else DEVNULL),
+                           stdin=PIPE
+                           if isinstance(stdin, (Callable, bytes, str)) else
+                           (stdin if stdin is not None else DEVNULL),
                            universal_newlines=universal_newlines,
                            env=os.environ if "env" not in kwargs else kwargs["env"],
                            **kwargs)
@@ -62,7 +70,7 @@ class ProcessRunner:
                                             self._proc.stdout, stdout)) if isinstance(stdout, Callable) else None
         self._stderr_reader = spawn(partial(stream_reader_line if universal_newlines else stream_reader_buf,
                                             self._proc.stderr, stderr)) if isinstance(stderr, Callable) else None
-        self._stdin_writer = spawn(partial(stream_writer_line if universal_newlines else stream_writer_buf,
+        self._stdin_writer = spawn(partial(stream_writer_text if universal_newlines else stream_writer_buf,
                                            self._proc.stdin, stdin)) if isinstance(stdin, Callable) else None
 
     @property

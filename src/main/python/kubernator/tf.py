@@ -5,8 +5,9 @@
 
 import json
 import logging
+import re
 
-from kubernator.api import KubernatorPlugin
+from kubernator.api import KubernatorPlugin, StripNL
 
 logger = logging.getLogger("kubernator.tf")
 
@@ -23,14 +24,28 @@ class TerraformPlugin(KubernatorPlugin):
 
     def handle_init(self):
         context = self.context
-        version = json.loads(context.app.run_capturing_out(["terraform", "version", "-json"],
-                                                           self.proc_logger.error))["terraform_version"]
+        stdout_logger = StripNL(self.proc_logger.info)
+        stderr_logger = StripNL(self.proc_logger.warning)
+        version_out: str = context.app.run_capturing_out(["terraform", "version", "-json"],
+                                                         stderr_logger)
+        try:
+            version = json.loads(version_out)["terraform_version"]
+        except json.decoder.JSONDecodeError:
+            # Probably old Terraform
+            if m := re.match(r"Terraform v([0-9.]+)", version_out):
+                version = m[1]
+            else:
+                raise RuntimeError(f"Unable to determine Terraform version: {version_out}")
+
         logger.info("Found Terraform version %s", version)
 
-        outputs = json.loads(context.app.run_capturing_out(["terraform", "output", "-json"],
-                                                           self.proc_logger.error))
+        context.app.run(["terraform", "init"], stdout_logger, stderr_logger).wait()
 
-        context.globals.tf = dict(output={k: v["values"] for k, v in outputs.items()})
+        output = json.loads(context.app.run_capturing_out(["terraform", "output", "-json"],
+                                                           stderr_logger))
+        if not output:
+            raise RuntimeError(f"Terraform output produced no values. Please check if Terraform is functioning.")
+        context.globals.tf = {k: v["value"] for k, v in output.items()}
 
     def __repr__(self):
         return "Terraform Plugin"

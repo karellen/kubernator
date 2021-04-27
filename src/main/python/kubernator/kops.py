@@ -8,16 +8,22 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import yaml
+
 from kubernator.api import (KubernatorPlugin, scan_dir,
                             FileType,
-                            load_file,
                             load_remote_file,
                             StringIO,
+io_StringIO,
                             TemplateEngine,
-                            StripNL)
+                            StripNL,
+                            Globs)
 from kubernator.k8s_api import K8SResourcePluginMixin
 
 logger = logging.getLogger("kubernator.kops")
+proc_logger = logger.getChild("kops")
+stdout_logger = StripNL(proc_logger.info)
+stderr_logger = StripNL(proc_logger.warning)
 
 KOPS_CRDS = ["kops.k8s.io_clusters.yaml",
              "kops.k8s.io_instancegroups.yaml",
@@ -29,7 +35,6 @@ KOPS_SCHEMA_VERSION = "1.20.6"
 
 class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     logger = logger
-    proc_logger = logger.getChild("kops")
 
     def __init__(self):
         self.context = None
@@ -68,6 +73,7 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         context.globals.kops = dict(walk_remote=self.walk_remote,
                                     walk_local=self.walk_local,
                                     update=self.update,
+                                    export=self.export,
                                     master_interval="8m",
                                     node_interval="8m"
                                     )
@@ -103,14 +109,15 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
     def walk_local(self, path: Path, excludes=(".*",), includes=("*.kops.yaml", "*.kops.yml")):
         context = self.context
+        path = Path(path)
 
-        for f in scan_dir(logger, path, lambda d: d.is_file(), excludes, includes):
+        for f in scan_dir(logger, path, lambda d: d.is_file(), Globs(excludes), Globs(includes)):
             p = path / f.name
             display_p = context.app.display_path(p)
             logger.debug("Adding Kops resources from %s", display_p)
-            template_source = load_file(logger, p, FileType.YAML, display_p)
 
-            template = self.template_engine.from_string(template_source)
+            with open(p, "rt") as file:
+                template = self.template_engine.from_string(file.read())
 
             self.add_resources(template.render({"ktor": context}), display_p)
 
@@ -118,8 +125,6 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         context = self.context
         run = context.app.run
         run_capturing_out = context.app.run_capturing_out
-        stdout_logger = StripNL(self.proc_logger.info)
-        stderr_logger = StripNL(self.proc_logger.warning)
 
         os.environ["KUBECONFIG"] = str(self.kubeconfig_path)
         os.environ["KOPS_CLUSTER_NAME"] = context.kops.cluster_name
@@ -127,25 +132,22 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         kops_extra_args = ["--name", context.kops.cluster_name, "--state", context.kops.state_store]
 
-        logger.info("Exporting kubeconfig from kOps")
-        run(self.kops_stanza + ["export", "kubecfg", "--admin"] + kops_extra_args,
-            stdout_logger,
-            stderr_logger).wait()
-
-        if not self.kubeconfig_path.exists():
-            raise RuntimeError("kOps failed to export kubeconfig for unknown reason - check AWS credentials")
-
-        for resource in self.resources:
+        for resource in self.resources.values():
             logger.info("Replacing/creating kOps resource %s", resource)
-            run(self.kops_stanza + ["replace", "--force", "-f", "-"] + kops_extra_args,
-                stdout_logger,
-                stderr_logger,
-                StringIO(resource.manifest))
+            resource_out = io_StringIO()
+            yaml.dump(resource.manifest, resource_out)
+            if context.app.args.dry_run:
+                logger.info("Would replace kOps resource if not for dry-run mode: %s", resource_out.getvalue())
+            else:
+                run(self.kops_stanza + ["replace", "--force", "-f", "-"] + kops_extra_args,
+                    stdout_logger,
+                    stderr_logger,
+                    resource_out.getvalue())
 
         logger.info("Staging kOps update")
         update_cmd = self.kops_stanza + ["update", "cluster"] + kops_extra_args
         result = run_capturing_out(update_cmd, stderr_logger)
-        self.proc_logger.info(result)
+        proc_logger.info(result)
         if "Must specify --yes to apply changes" in result:
             logger.info("kOps update would make changes")
             if context.app.args.dry_run:
@@ -156,12 +158,14 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                     stdout_logger,
                     stderr_logger).wait()
 
+        self.export()
+
         logger.info("Staging kOps cluster rolling update")
         rolling_update_cmd = self.kops_stanza + ["rolling-update", "cluster",
                                                  "--master-interval", context.kops.master_interval,
                                                  "--node-interval", context.kops.node_interval] + kops_extra_args
         result = run_capturing_out(rolling_update_cmd, stderr_logger)
-        self.proc_logger.info(result)
+        proc_logger.info(result)
         if "Must specify --yes to apply changes" in result:
             logger.info("kOps cluster rolling update would make changes")
             if context.app.args.dry_run:
@@ -171,6 +175,19 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 run(rolling_update_cmd + ["--yes"],
                     stdout_logger,
                     stderr_logger).wait()
+
+    def export(self):
+        context = self.context
+        run = context.app.run
+
+        kops_extra_args = ["--name", context.kops.cluster_name, "--state", context.kops.state_store]
+        logger.info("Exporting kubeconfig from kOps")
+        run(self.kops_stanza + ["export", "kubecfg", "--admin"] + kops_extra_args,
+            stdout_logger,
+            stderr_logger).wait()
+
+        if not self.kubeconfig_path.exists():
+            raise RuntimeError("kOps failed to export kubeconfig for unknown reason - check AWS credentials")
 
     def __repr__(self):
         return "kOps Plugin"
