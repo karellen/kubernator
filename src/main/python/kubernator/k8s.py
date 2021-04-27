@@ -89,24 +89,28 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         logger.debug("Reading Kubernetes OpenAPI spec for version %s", version.git_version)
 
-        def k8s_downloader(url, file_name, cache: dict):
-            try:
-                response, _, headers = self.k8s_client.call_api("/openapi/v2",
-                                                                "GET",
-                                                                _preload_content=False,
-                                                                header_params=cache)
-                with open(file_name, "wb") as f:
-                    f.write(response.data)
-                return headers
-            except ApiException as e:
-                if e.status != 304:
-                    raise
+        if False:
+            def k8s_downloader(url, file_name, cache: dict):
+                try:
+                    response, _, headers = self.k8s_client.call_api("/openapi/v2",
+                                                                    "GET",
+                                                                    _preload_content=False,
+                                                                    header_params=cache)
+                    with open(file_name, "wb") as f:
+                        f.write(response.data)
+                    return headers
+                except ApiException as e:
+                    if e.status != 304:
+                        raise
 
-        k8s_def = load_remote_file(logger,
-                                   f"{self.k8s_client.configuration.host}/openapi/v2",
-                                   FileType.JSON,
-                                   downloader=k8s_downloader)
+            k8s_def = load_remote_file(logger,
+                                       f"{self.k8s_client.configuration.host}/openapi/v2",
+                                       FileType.JSON,
+                                       downloader=k8s_downloader)
 
+        k8s_def = load_remote_file(logger, f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
+                                           f"{version.git_version}/api/openapi-spec/swagger.json",
+                                   FileType.JSON)
         self.resource_definitions_schema = k8s_def
 
         self._populate_resource_definitions()

@@ -85,7 +85,7 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         self.resource_definitions_schema = load_remote_file(logger,
                                                             f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
                                                             f"v{KOPS_SCHEMA_VERSION}/api/openapi-spec/swagger.json",
-                                                            FileType.JSON, "kops")
+                                                            FileType.JSON)
         self._populate_resource_definitions()
 
         common_url_path = f"https://raw.githubusercontent.com/kubernetes/kops/v{self.version}/k8s/crds"
