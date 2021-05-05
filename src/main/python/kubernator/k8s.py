@@ -264,6 +264,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             else:
                 raise
         else:
+            logger.trace("Attempting to retrieve a normalized patch for resource %s: %s", resource, resource.manifest)
             merged_resource = resource.patch(resource.manifest,
                                              patch_type=K8SResourcePatchType.SERVER_SIDE_PATCH,
                                              dry_run=True,
