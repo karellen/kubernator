@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import sys
 import tempfile
 import traceback
 import urllib.parse
@@ -24,7 +25,11 @@ from typing import Optional, Union
 import requests
 import yaml
 from appdirs import user_config_dir
-from jinja2 import (Environment, ChainableUndefined, make_logging_undefined, Template as JinjaTemplate)
+from jinja2 import (Environment,
+                    ChainableUndefined,
+                    make_logging_undefined,
+                    Template as JinjaTemplate,
+                    contextfunction)
 from jsonschema import validators
 
 _CACHE_HEADER_TRANSLATION = {"etag": "if-none-match",
@@ -290,8 +295,12 @@ class Globs(MutableSet[Union[str, re.Pattern]]):
 
 
 class TemplateEngine:
+    VARIABLE_START_STRING = "{${"
+    VARIABLE_END_STRING = "}$}"
+
     def __init__(self, logger):
         self.template_failures = 0
+        self.templates = {}
 
         class CollectingUndefined(ChainableUndefined):
             __slots__ = ()
@@ -304,9 +313,25 @@ class TemplateEngine:
             logger=logger,
             base=CollectingUndefined
         )
-        self.env = Environment(variable_start_string="{${",
-                               variable_end_string="}$}",
+
+        @contextfunction
+        def variable_finalizer(ctx, value):
+            normalized_value = str(value)
+            if self.VARIABLE_START_STRING in normalized_value and self.VARIABLE_END_STRING in normalized_value:
+                value_template_content = sys.intern(normalized_value)
+                env: Environment = ctx.environment
+                value_template = self.templates.get(value_template_content)
+                if not value_template:
+                    value_template = env.from_string(value_template_content, env.globals)
+                    self.templates[value_template_content] = value_template
+                return value_template.render(ctx.parent)
+
+            return normalized_value
+
+        self.env = Environment(variable_start_string=self.VARIABLE_START_STRING,
+                               variable_end_string=self.VARIABLE_END_STRING,
                                autoescape=False,
+                               finalize=variable_finalizer,
                                undefined=logging_undefined)
 
     def from_string(self, template):
