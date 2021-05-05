@@ -257,6 +257,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         logger.debug("Applying resource %s%s", resource, status_msg)
         try:
             remote_resource = resource.get()
+            logger.trace("Current resource %s: %s", resource, remote_resource)
         except ApiException as e:
             if e.status == 404:
                 logger.info("Creating resource %s%s", resource, status_msg)
@@ -269,6 +270,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                              patch_type=K8SResourcePatchType.SERVER_SIDE_PATCH,
                                              dry_run=True,
                                              force=True)
+            logger.trace("Merged resource %s: %s", resource, merged_resource)
             patch = jsonpatch.make_patch(remote_resource, merged_resource)
             logger.trace("Resource %s initial patches are: %s", resource, patch)
             patch = self._filter_resource_patch(patch, patch_field_excludes)
