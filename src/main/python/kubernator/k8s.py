@@ -276,7 +276,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 logger.info("Patching resource %s%s", resource, status_msg)
                 patch_func(patch)
             else:
-                logger.info("Nothing to patch for resource %s")
+                logger.info("Nothing to patch for resource %s", resource)
 
     def _filter_resource_patch(self, patch: Iterable[Mapping], excludes: Iterable[re.compile]):
         result = []

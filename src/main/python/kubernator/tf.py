@@ -39,10 +39,13 @@ class TerraformPlugin(KubernatorPlugin):
 
         logger.info("Found Terraform version %s", version)
 
-        context.app.run(["terraform", "init"], stdout_logger, stderr_logger).wait()
+        context.app.run(["terraform", "init",
+                         "-reconfigure",
+                         "-input=false",
+                         "-upgrade=true"], stdout_logger, stderr_logger).wait()
 
         output = json.loads(context.app.run_capturing_out(["terraform", "output", "-json"],
-                                                           stderr_logger))
+                                                          stderr_logger))
         if not output:
             raise RuntimeError(f"Terraform output produced no values. Please check if Terraform is functioning.")
         context.globals.tf = {k: v["value"] for k, v in output.items()}
