@@ -62,6 +62,15 @@ class K8SResourcePatchType(Enum):
     SERVER_SIDE_PATCH = auto()
 
 
+class K8SPropagationPolicy(Enum):
+    BACKGROUND = ("Background",)
+    FOREGROUND = ("Foreground",)
+    ORPHAN = ("Orpha",)
+
+    def __init__(self, policy):
+        self.policy = policy
+
+
 def is_integer(instance):
     # bool inherits from int, so ensure bools aren't reported as ints
     if isinstance(instance, bool):
@@ -162,6 +171,7 @@ class K8SResourceDef:
         self._api_get = None
         self._api_create = None
         self._api_patch = None
+        self._api_delete = None
 
     @property
     def group(self) -> str:
@@ -190,6 +200,10 @@ class K8SResourceDef:
     @property
     def patch(self):
         return self._api_patch
+
+    @property
+    def delete(self):
+        return self._api_delete
 
     def __eq__(self, o: object) -> bool:
         if not isinstance(o, K8SResourceDef):
@@ -262,10 +276,12 @@ class K8SResourceDef:
                 self._api_get = partial(k8s_api.get_namespaced_custom_object, **kwargs)
                 self._api_patch = partial(k8s_api.patch_namespaced_custom_object, **kwargs)
                 self._api_create = partial(k8s_api.create_namespaced_custom_object, **kwargs)
+                self._api_delete = partial(k8s_api.delete_namespaced_custom_object, **kwargs)
             else:
                 self._api_get = partial(k8s_api.get_cluster_custom_object, **kwargs)
                 self._api_patch = partial(k8s_api.patch_cluster_custom_object, **kwargs)
                 self._api_create = partial(k8s_api.create_cluster_custom_object, **kwargs)
+                self._api_delete = partial(k8s_api.delete_cluster_custom_object, **kwargs)
         else:
             # Take care for the case e.g. api_type is "apiextensions.k8s.io"
             # Only replace the last instance
@@ -285,10 +301,12 @@ class K8SResourceDef:
                 self._api_get = getattr(k8s_api, f"read_namespaced_{kind}")
                 self._api_patch = getattr(k8s_api, f"patch_namespaced_{kind}")
                 self._api_create = getattr(k8s_api, f"create_namespaced_{kind}")
+                self._api_delete = getattr(k8s_api, f"delete_namespaced_{kind}")
             else:
                 self._api_get = getattr(k8s_api, f"read_{kind}")
                 self._api_patch = getattr(k8s_api, f"patch_{kind}")
                 self._api_create = getattr(k8s_api, f"create_{kind}")
+                self._api_delete = getattr(k8s_api, f"delete_{kind}")
 
 
 class K8SResourceKey(namedtuple("K8SResourceKey", ["group", "version", "kind", "name", "namespace"])):
@@ -370,7 +388,7 @@ class K8SResource:
             kwargs["namespace"] = self.namespace
         if dry_run:
             kwargs["dry_run"] = "All"
-        return json.loads(self.rdef.create(**kwargs).data)
+        return json.loads(rdef.create(**kwargs).data)
 
     def patch(self, json_patch, *, patch_type: K8SResourcePatchType, force=False, dry_run=True):
         rdef = self.rdef
@@ -395,12 +413,25 @@ class K8SResource:
                 return "application/apply-patch+yaml"
             raise NotImplementedError
 
-        old_func = self.rdef.patch.__self__.api_client.select_header_content_type
+        old_func = rdef.patch.__self__.api_client.select_header_content_type
         try:
-            self.rdef.patch.__self__.api_client.select_header_content_type = select_header_content_type_patch
-            return json.loads(self.rdef.patch(**kwargs).data)
+            rdef.patch.__self__.api_client.select_header_content_type = select_header_content_type_patch
+            return json.loads(rdef.patch(**kwargs).data)
         finally:
-            self.rdef.patch.__self__.api_client.select_header_content_type = old_func
+            rdef.patch.__self__.api_client.select_header_content_type = old_func
+
+    def delete(self, *, dry_run=True, propagation_policy=K8SPropagationPolicy.BACKGROUND):
+        rdef = self.rdef
+        kwargs = {"name": self.name,
+                  "_preload_content": False,
+                  "propagation_policy": propagation_policy.policy
+                  }
+        if rdef.namespaced:
+            kwargs["namespace"] = self.namespace
+        if dry_run:
+            kwargs["dry_run"] = "All"
+
+        return json.loads(rdef.delete(**kwargs).data)
 
     @staticmethod
     def get_manifest_key(manifest):

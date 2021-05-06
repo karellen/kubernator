@@ -24,7 +24,8 @@ from kubernetes.config import load_incluster_config, load_kube_config, ConfigExc
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, load_file, FileType, load_remote_file)
 from kubernator.k8s_api import (K8SResourcePluginMixin,
                                 K8SResource,
-                                K8SResourcePatchType)
+                                K8SResourcePatchType,
+                                K8SPropagationPolicy)
 
 logger = logging.getLogger("kubernator.k8s")
 
@@ -64,6 +65,9 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                                          "^/metadata/creationTimestamp",
                                                          "^/metadata/resourceVersion",
                                                          ),
+                                   immutable_changes={("apps", "DaemonSet"): K8SPropagationPolicy.BACKGROUND,
+                                                      ("apps", "StatefulSet"): K8SPropagationPolicy.ORPHAN
+                                                      },
                                    default_includes=Globs(["*.yaml", "*.yml"], True),
                                    default_excludes=Globs([".*"], True),
                                    add_resources=self.add_resources,
@@ -157,11 +161,12 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         dump_results = []
         for resource in self.resources.values():
             if dump:
+                resource_id = {"apiVersion": resource.api_version,
+                               "kind": resource.kind,
+                               "name": resource.name
+                               }
+
                 def patch_func(patch):
-                    resource_id = {"apiVersion": resource.api_version,
-                                   "kind": resource.kind,
-                                   "name": resource.name
-                                   }
                     if resource.rdef.namespaced:
                         resource_id["namespace"] = resource.namespace
                     method_descriptor = {"method": "patch",
@@ -175,14 +180,23 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                          "body": resource.manifest}
                     dump_results.append(method_descriptor)
 
+                def delete_func(*, propagation_policy):
+                    method_descriptor = {"method": "delete",
+                                         "resource": resource_id,
+                                         "propagation_policy": propagation_policy.policy
+                                         }
+                    dump_results.append(method_descriptor)
             else:
                 patch_func = partial(resource.patch, patch_type=K8SResourcePatchType.JSON_PATCH, dry_run=dry_run)
                 create_func = partial(resource.create, dry_run=dry_run)
+                delete_func = partial(resource.delete, dry_run=dry_run)
 
-            self._apply_resource(patch_field_excludes,
+            self._apply_resource(dry_run,
+                                 patch_field_excludes,
                                  resource,
                                  patch_func,
                                  create_func,
+                                 delete_func,
                                  status_msg)
         if dump:
             if file_format in ("json", "json-pretty"):
@@ -246,13 +260,29 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             raise errors[0]
 
     def _apply_resource(self,
+                        dry_run,
                         patch_field_excludes: Iterable[re.compile],
                         resource: K8SResource,
                         patch_func: Callable[[Iterable[dict]], None],
                         create_func: Callable[[], None],
+                        delete_func: Callable[[K8SPropagationPolicy], None],
                         status_msg):
         rdef = resource.rdef
         rdef.populate_api(client, self.k8s_client)
+
+        def create(exists_ok=False):
+            logger.info("Creating resource %s%s%s", resource, status_msg,
+                        " (ignoring existing)" if exists_ok else "")
+            try:
+                create_func()
+            except ApiException as e:
+                if exists_ok:
+                    if e.status == 409:
+                        status = json.loads(e.body)
+                        if status["reason"] == "AlreadyExists":
+                            return
+
+                raise
 
         logger.debug("Applying resource %s%s", resource, status_msg)
         try:
@@ -260,26 +290,49 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             logger.trace("Current resource %s: %s", resource, remote_resource)
         except ApiException as e:
             if e.status == 404:
-                logger.info("Creating resource %s%s", resource, status_msg)
-                create_func()
+                create()
             else:
                 raise
         else:
             logger.trace("Attempting to retrieve a normalized patch for resource %s: %s", resource, resource.manifest)
-            merged_resource = resource.patch(resource.manifest,
-                                             patch_type=K8SResourcePatchType.SERVER_SIDE_PATCH,
-                                             dry_run=True,
-                                             force=True)
-            logger.trace("Merged resource %s: %s", resource, merged_resource)
-            patch = jsonpatch.make_patch(remote_resource, merged_resource)
-            logger.trace("Resource %s initial patches are: %s", resource, patch)
-            patch = self._filter_resource_patch(patch, patch_field_excludes)
-            logger.trace("Resource %s final patches are: %s", resource, patch)
-            if patch:
-                logger.info("Patching resource %s%s", resource, status_msg)
-                patch_func(patch)
+            try:
+                merged_resource = resource.patch(resource.manifest,
+                                                 patch_type=K8SResourcePatchType.SERVER_SIDE_PATCH,
+                                                 dry_run=True,
+                                                 force=True)
+            except ApiException as e:
+                if e.status == 422:
+                    status = json.loads(e.body)
+                    details = status["details"]
+                    immutable_key = details["group"], details["kind"]
+
+                    try:
+                        propagation_policy = self.context.k8s.immutable_changes[immutable_key]
+                    except KeyError:
+                        raise e from None
+                    else:
+                        for cause in details["causes"]:
+                            if cause["reason"] == "FieldValueInvalid" and "field is immutable" in cause["message"]:
+                                logger.info("Deleting resource %s (cascade %s)%s", resource,
+                                            propagation_policy.policy,
+                                            status_msg)
+                                delete_func(propagation_policy=propagation_policy)
+                                create(exists_ok=dry_run)
+                                return
+                        raise
+                else:
+                    raise
             else:
-                logger.info("Nothing to patch for resource %s", resource)
+                logger.trace("Merged resource %s: %s", resource, merged_resource)
+                patch = jsonpatch.make_patch(remote_resource, merged_resource)
+                logger.trace("Resource %s initial patches are: %s", resource, patch)
+                patch = self._filter_resource_patch(patch, patch_field_excludes)
+                logger.trace("Resource %s final patches are: %s", resource, patch)
+                if patch:
+                    logger.info("Patching resource %s%s", resource, status_msg)
+                    patch_func(patch)
+                else:
+                    logger.info("Nothing to patch for resource %s", resource)
 
     def _filter_resource_patch(self, patch: Iterable[Mapping], excludes: Iterable[re.compile]):
         result = []
