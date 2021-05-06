@@ -412,12 +412,17 @@ class K8SResource:
                 return "application/apply-patch+yaml"
             raise NotImplementedError
 
-        old_func = rdef.patch.__self__.api_client.select_header_content_type
+        if isinstance(rdef.patch, partial):
+            api_client = rdef.patch.func.__self__.api_client
+        else:
+            api_client = rdef.patch.__self__.api_client
+
+        old_func = api_client.select_header_content_type
         try:
-            rdef.patch.__self__.api_client.select_header_content_type = select_header_content_type_patch
+            api_client.select_header_content_type = select_header_content_type_patch
             return json.loads(rdef.patch(**kwargs).data)
         finally:
-            rdef.patch.__self__.api_client.select_header_content_type = old_func
+            api_client.select_header_content_type = old_func
 
     def delete(self, *, dry_run=True, propagation_policy=K8SPropagationPolicy.BACKGROUND):
         rdef = self.rdef
