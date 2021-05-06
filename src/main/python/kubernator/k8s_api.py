@@ -95,7 +95,6 @@ def type_validator(validator, data_type, instance, schema):
 
 K8SValidator = extend(OAS30Validator, validators={
     "type": type_validator,
-    "format": format,
     "required": required
 })
 
