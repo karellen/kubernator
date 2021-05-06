@@ -17,7 +17,7 @@ from typing import Union, Optional
 import yaml
 from jsonschema._format import FormatChecker
 from jsonschema._types import int_types, str_types
-from jsonschema._validators import format, required
+from jsonschema._validators import required
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import extend, Draft7Validator, RefResolver
 from openapi_schema_validator import OAS30Validator
@@ -481,7 +481,7 @@ class K8SResourcePluginMixin:
         if isinstance(manifests, (Mapping, dict)):
             return self.add_resource(manifests, source)
         else:
-            return [self.add_resource(m, source) for m in manifests]
+            return [self.add_resource(m, source) for m in manifests if m]
 
     def add_resource(self, manifest: dict, source: Union[str, Path] = None):
         resource = self._create_resource(manifest, source)
