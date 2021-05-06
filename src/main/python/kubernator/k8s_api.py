@@ -65,7 +65,7 @@ class K8SResourcePatchType(Enum):
 class K8SPropagationPolicy(Enum):
     BACKGROUND = ("Background",)
     FOREGROUND = ("Foreground",)
-    ORPHAN = ("Orpha",)
+    ORPHAN = ("Orphan",)
 
     def __init__(self, policy):
         self.policy = policy
