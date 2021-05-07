@@ -66,7 +66,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                                          "^/metadata/resourceVersion",
                                                          ),
                                    immutable_changes={("apps", "DaemonSet"): K8SPropagationPolicy.BACKGROUND,
-                                                      ("apps", "StatefulSet"): K8SPropagationPolicy.ORPHAN
+                                                      ("apps", "StatefulSet"): K8SPropagationPolicy.ORPHAN,
+                                                      ("apps", "Deployment"): K8SPropagationPolicy.ORPHAN,
                                                       },
                                    default_includes=Globs(["*.yaml", "*.yml"], True),
                                    default_excludes=Globs([".*"], True),
@@ -357,7 +358,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         except ConfigException as e:
             logger.trace("K8S in-cluster configuration failed", exc_info=e)
             logger.debug("Initializing K8S with kubeconfig configuration")
-            load_kube_config(config_file=os.environ.get('KUBECONFIG', '~/.kube/config'))
+            load_kube_config(config_file=os.environ.get("KUBECONFIG", "~/.kube/config"))
 
         k8s_client = client.ApiClient()
 
