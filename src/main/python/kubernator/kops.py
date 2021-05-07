@@ -13,8 +13,7 @@ import yaml
 from kubernator.api import (KubernatorPlugin, scan_dir,
                             FileType,
                             load_remote_file,
-                            StringIO,
-io_StringIO,
+                            io_StringIO,
                             TemplateEngine,
                             StripNL,
                             Globs)
@@ -166,7 +165,7 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                                  "--node-interval", context.kops.node_interval] + kops_extra_args
         result = run_capturing_out(rolling_update_cmd, stderr_logger)
         proc_logger.info(result)
-        if "Must specify --yes to apply changes" in result:
+        if "Must specify --yes to rolling-update" in result:
             logger.info("kOps cluster rolling update would make changes")
             if context.app.args.dry_run:
                 logger.info("Skipping actual kOps cluster rolling update due to dry-run")
