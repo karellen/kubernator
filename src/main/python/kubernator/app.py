@@ -16,6 +16,7 @@ from typing import Optional, Union
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, ValueDict, config_as_dict, config_parent,
                             Repository)
 from kubernator.helm import HelmPlugin
+from kubernator.istio import IstioPlugin
 from kubernator.k8s import KubernetesPlugin
 from kubernator.kops import KopsPlugin
 from kubernator.proc import run, run_capturing_out
@@ -32,7 +33,7 @@ def trace(self, msg, *args, **kwargs):
     To pass exception information, use the keyword argument exc_info with
     a true value, e.g.
 
-    logger.info("Houston, we have a %s", "interesting problem", exc_info=1)
+    logger.trace("Houston, we have a %s", "interesting problem", exc_info=1)
     """
     if self.isEnabledFor(TRACE):
         self._log(TRACE, msg, args, **kwargs)
@@ -83,13 +84,13 @@ def init_logging(verbose, output_format, output_file):
             fmt_cls = coloredlogs.ColoredFormatter
 
         else:
-            class Formatter(logging.Formatter):
-                def formatTime(self, record, datefmt=None):
-                    return datetime.datetime.fromtimestamp(record.created).isoformat()
+            fmt_cls = logging.Formatter
 
-            fmt_cls = Formatter
+        def formatTime(record, datefmt=None):
+            return datetime.datetime.fromtimestamp(record.created).isoformat()
 
         formatter = fmt_cls("%(asctime)s %(name)s %(levelname)s %(filename)s:%(lineno)d %(message)s")
+        formatter.formatTime = formatTime
     else:
         import json_log_formatter
 
@@ -192,7 +193,10 @@ class App(KubernatorPlugin):
 
         self.context = self._top_level_context
         context = self.context
-        self._run_handlers(KubernatorPlugin.handle_end, True, context)
+
+        self._run_handlers(KubernatorPlugin.handle_apply, True, context)
+
+        self._run_handlers(KubernatorPlugin.handle_verify, True, context)
 
     def register_plugin(self, handler: KubernatorPlugin):
         self._plugins.append(handler)
@@ -373,6 +377,7 @@ def main():
             app.register_plugin(TerraformPlugin())
             app.register_plugin(KopsPlugin())
             app.register_plugin(KubernetesPlugin())
+            app.register_plugin(IstioPlugin())
             app.register_plugin(HelmPlugin())
             app.register_plugin(TemplatePlugin())
             app.run()

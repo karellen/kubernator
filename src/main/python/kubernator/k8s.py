@@ -74,6 +74,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                    add_resources=self.add_resources,
                                    load_resources=self.api_load_resources,
                                    load_remote_resources=self.api_load_remote_resources,
+                                   load_crds=self.api_load_crds,
+                                   load_remote_crds=self.api_load_remote_crds,
                                    add_transformer=self.api_add_transformer,
                                    remove_transformer=self.api_remove_transformer,
                                    add_validator=self.api_remove_validator,
@@ -88,6 +90,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     def handle_start(self):
         context = self.context
         self.k8s_client = self._setup_k8s_client()
+        context.globals.k8s.k8s_client = self.k8s_client
 
         version = client.VersionApi(self.k8s_client).get_code()
         logger.info("Found Kubernetes %s on %s", version.git_version, self.k8s_client.configuration.host)
@@ -144,7 +147,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 if manifest:
                     self.add_resource(manifest, display_p)
 
-    def handle_end(self):
+    def handle_apply(self):
         context = self.context
         self._validate_resources()
 
@@ -207,10 +210,16 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 yaml.safe_dump(dump_results, file)
 
     def api_load_resources(self, path: Path, file_type: str):
-        return self.add_file_resources(path, FileType[file_type])
+        return self.add_local_resources(path, FileType[file_type.upper()])
 
     def api_load_remote_resources(self, url: str, file_type: str, file_category=None):
-        return self.add_remote_resources(url, FileType[file_type], sub_category=file_category)
+        return self.add_remote_resources(url, FileType[file_type.upper()], sub_category=file_category)
+
+    def api_load_crds(self, path: Path, file_type: str):
+        return self.add_local_crds(path, FileType[file_type.upper()])
+
+    def api_load_remote_crds(self, url: str, file_type: str, file_category=None):
+        return self.add_remote_crds(url, FileType[file_type.upper()], sub_category=file_category)
 
     def api_add_transformer(self, transformer):
         if transformer not in self._transformers:

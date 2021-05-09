@@ -462,5 +462,8 @@ class KubernatorPlugin:
     def handle_after_dir(self, cwd: Path):
         pass
 
-    def handle_end(self):
+    def handle_apply(self):
+        pass
+
+    def handle_verify(self):
         pass

@@ -29,7 +29,7 @@ KOPS_CRDS = ["kops.k8s.io_clusters.yaml",
              "kops.k8s.io_keysets.yaml",
              "kops.k8s.io_sshcredentials.yaml"]
 
-KOPS_SCHEMA_VERSION = "1.20.6"
+OBJECT_SCHEMA_VERSION = "1.20.6"
 
 
 class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
@@ -78,20 +78,19 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                     )
         context.kops = dict()
 
-        self.version = context.app.run_capturing_out(["kops", "version", "--short"], logger.error).strip()
+        self.version = context.app.run_capturing_out(["kops", "version", "--short"], stderr_logger).strip()
         logger.info("Found kOps version %s", self.version)
 
         self.resource_definitions_schema = load_remote_file(logger,
                                                             f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
-                                                            f"v{KOPS_SCHEMA_VERSION}/api/openapi-spec/swagger.json",
+                                                            f"v{OBJECT_SCHEMA_VERSION}/api/openapi-spec/swagger.json",
                                                             FileType.JSON)
         self._populate_resource_definitions()
 
         common_url_path = f"https://raw.githubusercontent.com/kubernetes/kops/v{self.version}/k8s/crds"
         for kops_crd in KOPS_CRDS:
             url = f"{common_url_path}/{kops_crd}"
-            for manifest in load_remote_file(logger, url, FileType.YAML, sub_category="kops"):
-                self.add_crd(manifest, url)
+            self.add_remote_crds(url, FileType.YAML, sub_category="kops")
 
     def handle_start(self):
         context = self.context
@@ -135,7 +134,7 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             logger.info("Replacing/creating kOps resource %s", resource)
             resource_out = io_StringIO()
             yaml.dump(resource.manifest, resource_out)
-            if context.app.args.dry_run:
+            if context.app.args.mode != "apply" or context.app.args.dry_run:
                 logger.info("Would replace kOps resource if not for dry-run mode: %s", resource_out.getvalue())
             else:
                 run(self.kops_stanza + ["replace", "--force", "-f", "-"] + kops_extra_args,
@@ -149,7 +148,7 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         proc_logger.info(result)
         if "Must specify --yes to apply changes" in result:
             logger.info("kOps update would make changes")
-            if context.app.args.dry_run:
+            if context.app.args.mode != "apply" or context.app.args.dry_run:
                 logger.info("Skipping actual kOps update due to dry-run")
             else:
                 logger.info("Running kOps update")
@@ -167,7 +166,7 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         proc_logger.info(result)
         if "Must specify --yes to rolling-update" in result:
             logger.info("kOps cluster rolling update would make changes")
-            if context.app.args.dry_run:
+            if context.app.args.mode != "apply" or context.app.args.dry_run:
                 logger.info("Skipping actual kOps cluster rolling update due to dry-run")
             else:
                 logger.info("Running kOps cluster rolling update")

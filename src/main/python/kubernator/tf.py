@@ -42,7 +42,7 @@ class TerraformPlugin(KubernatorPlugin):
         context.app.run(["terraform", "init",
                          "-reconfigure",
                          "-input=false",
-                         "-upgrade=true"], stdout_logger, stderr_logger).wait()
+                         "-upgrade=false"], stdout_logger, stderr_logger).wait()
 
         output = json.loads(context.app.run_capturing_out(["terraform", "output", "-json"],
                                                           stderr_logger))

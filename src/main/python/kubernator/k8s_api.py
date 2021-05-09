@@ -228,13 +228,17 @@ class K8SResourceDef:
 
         plural = None
         namespaced = False
-        for path in paths.get(key, ()):
-            if m := NAMESPACED_RESOURCE_PATH.fullmatch(path):
-                plural = m[1]
-                namespaced = True
-                break
-            elif m := CLUSTER_RESOURCE_PATH.fullmatch(path):
-                plural = m[1]
+
+        if singular == "namespace":
+            plural = "namespaces"
+        else:
+            for path in paths.get(key, ()):
+                if m := NAMESPACED_RESOURCE_PATH.fullmatch(path):
+                    plural = m[1]
+                    namespaced = True
+                    break
+                elif m := CLUSTER_RESOURCE_PATH.fullmatch(path):
+                    plural = m[1]
 
         yield K8SResourceDef(key, singular, plural, namespaced, False, schema)
 
@@ -251,7 +255,10 @@ class K8SResourceDef:
 
         for version_spec in spec["versions"]:
             version = version_spec["name"]
-            schema = version_spec["schema"]["openAPIV3Schema"]
+            if resource.version == "v1":
+                schema = version_spec["schema"]["openAPIV3Schema"]
+            else:
+                schema = spec["validation"]["openAPIV3Schema"]
             yield K8SResourceDef(K8SResourceDefKey(group, version, kind), singular, plural, namespaced, True, schema)
 
     def populate_api(self, k8s_client_module, k8s_client):
@@ -364,7 +371,7 @@ class K8SResource:
 
     @property
     def is_crd(self):
-        return self.api_version == "apiextensions.k8s.io/v1" and self.kind == "CustomResourceDefinition"
+        return self.group == "apiextensions.k8s.io" and self.kind == "CustomResourceDefinition"
 
     def __str__(self):
         return f"{self.api_version}/{self.kind}/{self.name}{'.' + self.namespace if self.namespace else ''}"
@@ -484,6 +491,8 @@ class K8SResourcePluginMixin:
             return [self.add_resource(m, source) for m in manifests if m]
 
     def add_resource(self, manifest: dict, source: Union[str, Path] = None):
+        if not source:
+            source = calling_frame_source()
         resource = self._create_resource(manifest, source)
 
         try:
@@ -500,22 +509,52 @@ class K8SResourcePluginMixin:
                                       trans_resource, source, exc_info=error)
             raise errors[0]
 
-        self._add_resource(trans_resource, source)
+        return self._add_resource(trans_resource, source)
 
-    def add_file_resources(self, path: Path, file_type: FileType, source: str = None):
+    def add_crds(self, manifests: Union[str, list, dict], source: Union[str, Path] = None):
+        if not source:
+            source = calling_frame_source()
+
+        if isinstance(manifests, str):
+            manifests = list(yaml.safe_load_all(StringIO(manifests)))
+
+        if isinstance(manifests, (Mapping, dict)):
+            return self.add_crd(manifests, source)
+        else:
+            return [self.add_crd(m, source) for m in manifests if m]
+
+    def add_crd(self, manifest: dict, source: Union[str, Path] = None):
+        if not source:
+            source = calling_frame_source()
+        resource = self._create_resource(manifest, source)
+        if not resource.is_crd:
+            resource_description = K8SResource.get_manifest_description(manifest, source)
+            raise ValueError(f"K8S manifest {resource_description} from {source} is not a CRD")
+
+        self._add_crd(resource)
+        return resource
+
+    def add_local_resources(self, path: Path, file_type: FileType, source: str = None):
         manifests = load_file(self.logger, path, file_type)
 
-        for manifest in manifests:
-            if manifest:
-                self.add_resource(manifest, source or path)
+        return [self.add_resource(m, source or path) for m in manifests if m]
 
     def add_remote_resources(self, url: str, file_type: FileType, *, sub_category: Optional[str] = None,
                              source: str = None):
         manifests = load_remote_file(self.logger, url, file_type, sub_category)
 
-        for manifest in manifests:  # type: Mapping
-            if manifest:
-                self.add_resource(manifest, source or url)
+        return [self.add_resource(m, source or url) for m in manifests if m]
+
+    def add_local_crds(self, path: Path, file_type: FileType, source: str = None):
+        manifests = load_file(self.logger, path, file_type)
+
+        return [self.add_crd(m, source or path) for m in manifests if m]
+
+    def add_remote_crds(self, url: str, file_type: FileType, *, sub_category: Optional[str] = None,
+                        source: str = None):
+        manifests = load_remote_file(self.logger, url, file_type, sub_category)
+
+        return [self.add_crd(m, source or url) for m in manifests if m]
 
     def get_api_versions(self):
         api_versions = set()
@@ -524,14 +563,6 @@ class K8SResourcePluginMixin:
             if api_version not in api_versions:
                 api_versions.add(api_version)
         return sorted(api_versions)
-
-    def add_crd(self, manifest: dict, source: Union[str, Path] = None):
-        resource = self._create_resource(manifest, source)
-        if not resource.is_crd:
-            resource_description = K8SResource.get_manifest_description(manifest, source)
-            raise ValueError(f"K8S manifest {resource_description} from {source} is not a CRD")
-
-        self._add_crd(resource)
 
     def _create_resource(self, manifest: dict, source: Union[str, Path] = None):
         resource_description = K8SResource.get_manifest_description(manifest, source)
@@ -562,6 +593,8 @@ class K8SResourcePluginMixin:
 
         if resource.is_crd:
             self._add_crd(resource)
+
+        return resource
 
     def _transform_resource(self,
                             resources: Sequence[K8SResource],
