@@ -162,7 +162,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         logger.info("Running Istio operator init%s", status_details)
         istio_operator_init = self.istio_stanza + ["operator", "init", "-f", operators_file.name]
-        context.app.run(istio_operator_init + ["--dry-run"] if dry_run else [],
+        context.app.run(istio_operator_init + (["--dry-run"] if dry_run else []),
                         stdout_logger,
                         stderr_logger).wait()
 
