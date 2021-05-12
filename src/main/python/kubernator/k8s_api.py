@@ -586,7 +586,7 @@ class K8SResourcePluginMixin:
                 raise ValidationError("resource %s from %s already exists and was added from %s" %
                                       (resource.key, resource.source, existing_resource.source))
             self.logger.trace("K8S resource for %s from %s is already present and is identical", resource, source)
-            return
+            return resource
 
         self.logger.info("Adding K8S resource for %s from %s", resource, source)
         self.resources[resource.key] = resource
