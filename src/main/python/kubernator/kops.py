@@ -130,11 +130,14 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         kops_extra_args = ["--name", context.kops.cluster_name, "--state", context.kops.state_store]
 
+        cmd = context.app.args.command
+        dry_run = context.app.args.dry_run
+
         for resource in self.resources.values():
             logger.info("Replacing/creating kOps resource %s", resource)
             resource_out = io_StringIO()
             yaml.dump(resource.manifest, resource_out)
-            if context.app.args.mode != "apply" or context.app.args.dry_run:
+            if cmd != "apply" or dry_run:
                 logger.info("Would replace kOps resource if not for dry-run mode: %s", resource_out.getvalue())
             else:
                 run(self.kops_stanza + ["replace", "--force", "-f", "-"] + kops_extra_args,
@@ -148,8 +151,8 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         proc_logger.info(result)
         if "Must specify --yes to apply changes" in result:
             logger.info("kOps update would make changes")
-            if context.app.args.mode != "apply" or context.app.args.dry_run:
-                logger.info("Skipping actual kOps update due to dry-run")
+            if cmd != "apply" or dry_run:
+                logger.info("Skipping actual kOps update due to dry-run mode")
             else:
                 logger.info("Running kOps update")
                 run(update_cmd + ["--yes"],
@@ -166,7 +169,7 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         proc_logger.info(result)
         if "Must specify --yes to rolling-update" in result:
             logger.info("kOps cluster rolling update would make changes")
-            if context.app.args.mode != "apply" or context.app.args.dry_run:
+            if cmd != "apply" or dry_run:
                 logger.info("Skipping actual kOps cluster rolling update due to dry-run")
             else:
                 logger.info("Running kOps cluster rolling update")
