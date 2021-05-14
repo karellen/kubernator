@@ -143,7 +143,7 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 run(self.kops_stanza + ["replace", "--force", "-f", "-"] + kops_extra_args,
                     stdout_logger,
                     stderr_logger,
-                    resource_out.getvalue())
+                    resource_out.getvalue()).wait()
 
         logger.info("Staging kOps update")
         update_cmd = self.kops_stanza + ["update", "cluster"] + kops_extra_args
