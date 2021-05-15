@@ -93,7 +93,7 @@ class ProcessRunner:
             raise RuntimeError("not available")
         return self._proc.stdin
 
-    def wait(self, fail=True, timeout=None):
+    def wait(self, fail=True, timeout=None, _out_func=None):
         with Timeout(timeout, TimeoutExpired):
             retcode = self._proc.wait()
             if self._stdin_writer:
@@ -103,7 +103,10 @@ class ProcessRunner:
             if self._stderr_reader:
                 self._stderr_reader.join()
         if fail and retcode:
-            raise CalledProcessError(retcode, self._safe_args)
+            output = None
+            if _out_func:
+                output = _out_func()
+            raise CalledProcessError(retcode, self._safe_args, output=output)
         return retcode
 
     def terminate(self):
@@ -120,5 +123,5 @@ def run_capturing_out(args, stderr_logger, stdin=DEVNULL, *, safe_args=None, uni
     out = StringIO(trimmed=False) if universal_newlines else BytesIO()
     proc = run(args, out.write, stderr_logger, stdin, safe_args=safe_args, universal_newlines=universal_newlines,
                **kwargs)
-    proc.wait()
+    proc.wait(_out_func=lambda: out.getvalue())
     return out.getvalue()

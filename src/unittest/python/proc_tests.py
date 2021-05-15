@@ -12,7 +12,7 @@ import logging
 import sys
 import unittest
 
-from kubernator.proc import run_capturing_out, DEVNULL
+from kubernator.proc import run_capturing_out, DEVNULL, CalledProcessError
 
 TRACE = 5
 
@@ -40,3 +40,12 @@ class ProcTestcase(unittest.TestCase):
                                            DEVNULL,
                                            "Hello world"
                                            ), "Hello world\n")
+
+    def test_proc_output_with_failure(self):
+        try:
+            run_capturing_out([sys.executable, "-c", "import sys; print('Hello World'); sys.exit(1)"],
+                              DEVNULL,
+                              )
+            self.assertFalse(True, "Should not have gotten here")
+        except CalledProcessError as e:
+            self.assertEqual(e.output, "Hello World\n")

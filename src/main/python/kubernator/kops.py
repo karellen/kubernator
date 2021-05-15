@@ -2,7 +2,7 @@
 #
 # Copyright 2021 © Payperless
 #
-
+import json
 import logging
 import os
 from pathlib import Path
@@ -18,6 +18,7 @@ from kubernator.api import (KubernatorPlugin, scan_dir,
                             StripNL,
                             Globs)
 from kubernator.k8s_api import K8SResourcePluginMixin
+from kubernator.proc import CalledProcessError
 
 logger = logging.getLogger("kubernator.kops")
 proc_logger = logger.getChild("kops")
@@ -132,6 +133,24 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         cmd = context.app.args.command
         dry_run = context.app.args.dry_run
+
+        if cmd != "apply":
+            logger.info("Skipping cluster validation since not in apply mode")
+        else:
+            validation_failed = False
+            try:
+                output = run_capturing_out(self.kops_stanza + ["validate", "cluster", "-o", "json"])
+            except CalledProcessError as e:
+                validation_failed = True
+                output = e.output
+
+            if validation_failed:
+                validation_results = json.loads(output)
+                for failure in validation_results["failures"]:
+                    logger.error("%s %s failed validation: %s", failure["type"], failure["name"], failure["message"])
+                raise RuntimeError("Cluster validation failed!")
+            else:
+                logger.info("Cluster validation successful!")
 
         for resource in self.resources.values():
             logger.info("Replacing/creating kOps resource %s", resource)
