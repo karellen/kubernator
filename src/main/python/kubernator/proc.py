@@ -22,18 +22,20 @@ logger = logging.getLogger("kubernator.proc")
 
 
 def stream_writer_buf(pipe: BinaryIO, source):
-    if isinstance(source, Callable):
-        for buf in source():
-            pipe.write(buf)
-    else:
-        pipe.write(source)
+    with pipe:
+        if isinstance(source, Callable):
+            for buf in source():
+                pipe.write(buf)
+        else:
+            pipe.write(source)
 
 
 def stream_writer_text(pipe: TextIO, source):
-    if isinstance(source, Callable):
-        pipe.writelines(source())
-    else:
-        pipe.write(source)
+    with pipe:
+        if isinstance(source, Callable):
+            pipe.writelines(source())
+        else:
+            pipe.write(source)
 
 
 def stream_reader_buf(pipe: BinaryIO, sink_func):
@@ -59,19 +61,19 @@ class ProcessRunner:
         self._proc = Popen(args,
                            stdout=PIPE if isinstance(stdout, Callable) else (stdout if stdout is not None else DEVNULL),
                            stderr=PIPE if isinstance(stderr, Callable) else (stderr if stderr is not None else DEVNULL),
-                           stdin=PIPE
-                           if isinstance(stdin, (Callable, bytes, str)) else
+                           stdin=PIPE if isinstance(stdin, (Callable, bytes, str)) else
                            (stdin if stdin is not None else DEVNULL),
                            universal_newlines=universal_newlines,
                            env=os.environ if "env" not in kwargs else kwargs["env"],
                            **kwargs)
 
+        self._stdin_writer = (spawn(partial(stream_writer_text if universal_newlines else stream_writer_buf,
+                                            self._proc.stdin, stdin))
+                              if isinstance(stdin, (Callable, bytes, str)) else None)
         self._stdout_reader = spawn(partial(stream_reader_line if universal_newlines else stream_reader_buf,
                                             self._proc.stdout, stdout)) if isinstance(stdout, Callable) else None
         self._stderr_reader = spawn(partial(stream_reader_line if universal_newlines else stream_reader_buf,
                                             self._proc.stderr, stderr)) if isinstance(stderr, Callable) else None
-        self._stdin_writer = spawn(partial(stream_writer_text if universal_newlines else stream_writer_buf,
-                                           self._proc.stdin, stdin)) if isinstance(stdin, Callable) else None
 
     @property
     def stdout(self):
