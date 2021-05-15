@@ -139,7 +139,8 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         else:
             validation_failed = False
             try:
-                output = run_capturing_out(self.kops_stanza + ["validate", "cluster", "-o", "json"])
+                output = run_capturing_out(self.kops_stanza + ["validate", "cluster", "-o", "json"],
+                                           stderr_logger)
             except CalledProcessError as e:
                 validation_failed = True
                 output = e.output
