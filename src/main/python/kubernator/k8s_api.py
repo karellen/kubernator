@@ -315,11 +315,11 @@ class K8SResourceDef:
                 self._api_delete = getattr(k8s_api, f"delete_{kind}")
 
 
-class K8SResourceKey(namedtuple("K8SResourceKey", ["group", "version", "kind", "name", "namespace"])):
+class K8SResourceKey(namedtuple("K8SResourceKey", ["group", "kind", "name", "namespace"])):
     __slots__ = ()
 
     def __str__(self):
-        return (f"{self.group}{'/' if self.group else '/'}{self.version}/{self.kind}"
+        return (f"{self.group}{'/' if self.group else 'v1/'}{self.kind}"
                 f"/{self.name}{f'.{self.namespace}' if self.namespace else ''}")
 
 
@@ -337,7 +337,7 @@ class K8SResource:
 
     @property
     def version(self) -> str:
-        return self.key.version
+        return self.rdef.version
 
     @property
     def kind(self) -> str:
@@ -446,7 +446,7 @@ class K8SResource:
 
     @staticmethod
     def get_manifest_key(manifest):
-        return K8SResourceKey(*to_group_and_version(manifest["apiVersion"]),
+        return K8SResourceKey(to_group_and_version(manifest["apiVersion"])[0],
                               manifest["kind"],
                               manifest["metadata"]["name"],
                               manifest["metadata"].get("namespace"))
@@ -534,6 +534,13 @@ class K8SResourcePluginMixin:
         self._add_crd(resource)
         return resource
 
+    def create_resource(self, manifest: dict, source: Union[str, Path] = None):
+        """Create K8S resource without adding it"""
+        if not source:
+            source = calling_frame_source()
+
+        return self._create_resource(manifest, source)
+
     def add_local_resources(self, path: Path, file_type: FileType, source: str = None):
         manifests = load_file(self.logger, path, file_type)
 
@@ -586,7 +593,7 @@ class K8SResourcePluginMixin:
                 raise ValidationError("resource %s from %s already exists and was added from %s" %
                                       (resource.key, resource.source, existing_resource.source))
             self.logger.trace("K8S resource for %s from %s is already present and is identical", resource, source)
-            return resource
+            return existing_resource
 
         self.logger.info("Adding K8S resource for %s from %s", resource, source)
         self.resources[resource.key] = resource

@@ -120,18 +120,21 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     def handle_apply(self):
         context = self.context
 
-        with tempfile.NamedTemporaryFile(mode="wt", delete=False) as operators_file:
-            yaml.safe_dump_all((r.manifest for r in self.resources.values()), operators_file)
+        if not self.resources:
+            logger.info("Skipping Istio as no Operator was processed")
+        else:
+            with tempfile.NamedTemporaryFile(mode="wt", delete=False) as operators_file:
+                yaml.safe_dump_all((r.manifest for r in self.resources.values()), operators_file)
 
-        if context.app.args.command == "apply":
-            logger.info("Running Istio precheck")
-            context.app.run(self.istio_stanza + ["x", "precheck", "-f", operators_file.name],
-                            stdout_logger, stderr_logger).wait()
+            if context.app.args.command == "apply":
+                logger.info("Running Istio precheck")
+                context.app.run(self.istio_stanza + ["x", "precheck", "-f", operators_file.name],
+                                stdout_logger, stderr_logger).wait()
 
-            self._operator_init(operators_file, True)
+                self._operator_init(operators_file, True)
 
-            if not context.app.args.dry_run:
-                self._operator_init(operators_file, False)
+                if not context.app.args.dry_run:
+                    self._operator_init(operators_file, False)
 
     def _operator_init(self, operators_file, dry_run):
         context = self.context

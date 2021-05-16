@@ -80,6 +80,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                    remove_transformer=self.api_remove_transformer,
                                    add_validator=self.api_remove_validator,
                                    get_api_versions=self.get_api_versions,
+                                   create_resource=self.create_resource,
                                    _k8s=self,
                                    )
         context.k8s = dict(default_includes=Globs(context.globals.k8s.default_includes),
