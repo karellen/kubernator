@@ -134,25 +134,6 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         cmd = context.app.args.command
         dry_run = context.app.args.dry_run
 
-        if cmd != "apply":
-            logger.info("Skipping cluster validation since not in apply mode")
-        else:
-            validation_failed = False
-            try:
-                output = run_capturing_out(self.kops_stanza + ["validate", "cluster", "-o", "json"],
-                                           stderr_logger)
-            except CalledProcessError as e:
-                validation_failed = True
-                output = e.output
-
-            if validation_failed:
-                validation_results = json.loads(output)
-                for failure in validation_results["failures"]:
-                    logger.error("%s %s failed validation: %s", failure["type"], failure["name"], failure["message"])
-                raise RuntimeError("Cluster validation failed!")
-            else:
-                logger.info("Cluster validation successful!")
-
         for resource in self.resources.values():
             logger.info("Replacing/creating kOps resource %s", resource)
             resource_out = io_StringIO()
@@ -180,6 +161,27 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                     stderr_logger).wait()
 
         self.export()
+
+        if cmd != "apply":
+            logger.info("Skipping cluster validation since not in apply mode")
+        else:
+            validation_failed = False
+            try:
+                output = run_capturing_out(self.kops_stanza + ["validate", "cluster", "-o", "json"],
+                                           stderr_logger)
+            except CalledProcessError as e:
+                validation_failed = True
+                output = e.output
+
+            if validation_failed:
+                if output:
+                    validation_results = json.loads(output)
+                    for failure in validation_results["failures"]:
+                        logger.error("%s %s failed validation: %s", failure["type"], failure["name"],
+                                     failure["message"])
+                raise RuntimeError("Cluster validation failed!")
+            else:
+                logger.info("Cluster validation successful!")
 
         logger.info("Staging kOps cluster rolling update")
         rolling_update_cmd = self.kops_stanza + ["rolling-update", "cluster",
