@@ -323,7 +323,13 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                         raise e from None
                     else:
                         for cause in details["causes"]:
-                            if cause["reason"] == "FieldValueInvalid" and "field is immutable" in cause["message"]:
+                            if (
+                                    cause["reason"] == "FieldValueInvalid" and
+                                    "field is immutable" in cause["message"]
+                                    or
+                                    cause["reason"] == "FieldValueForbidden" and
+                                    "Forbidden: updates to" in cause["message"]
+                            ):
                                 logger.info("Deleting resource %s (cascade %s)%s", resource,
                                             propagation_policy.policy,
                                             status_msg)
