@@ -68,6 +68,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                    immutable_changes={("apps", "DaemonSet"): K8SPropagationPolicy.BACKGROUND,
                                                       ("apps", "StatefulSet"): K8SPropagationPolicy.ORPHAN,
                                                       ("apps", "Deployment"): K8SPropagationPolicy.ORPHAN,
+                                                      ("storage.k8s.io", "StorageClass"): K8SPropagationPolicy.ORPHAN,
                                                       },
                                    default_includes=Globs(["*.yaml", "*.yml"], True),
                                    default_excludes=Globs([".*"], True),
