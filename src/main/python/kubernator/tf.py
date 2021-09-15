@@ -60,7 +60,7 @@ class TerraformPlugin(KubernatorPlugin):
         output = json.loads(context.app.run_capturing_out(["terraform", "output", "-json"],
                                                           stderr_logger))
         if not output:
-            raise RuntimeError(f"Terraform output produced no values. Please check if Terraform is functioning.")
+            raise RuntimeError("Terraform output produced no values. Please check if Terraform is functioning.")
         context.globals.tf = {k: v["value"] for k, v in output.items()}
 
     def __repr__(self):

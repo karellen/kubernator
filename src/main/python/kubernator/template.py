@@ -157,7 +157,7 @@ class TemplatePlugin(KubernatorPlugin):
             raise ValueError(f"Template with a name {name} does not exist")
 
         template = self.templates[name]
-        logger.debug(f"Rendering template %s from %s in %s", name, template.source, source)
+        logger.debug("Rendering template %s from %s in %s", name, template.source, source)
         rendered_template = template.render(self.context, values)
 
         if self.template_engine.failures():

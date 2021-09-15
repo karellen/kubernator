@@ -1,0 +1,31 @@
+name: kubernator
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TWINE_USERNAME: __token__
+      TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+          architecture: x64
+      - name: Setup PyBuilder
+        shell: bash
+        run: pip install pybuilder
+      - name: Should Upload
+        if: github.event_name == 'push'
+        shell: bash
+        run: echo "PYB_UPLOAD=upload" >> "$GITHUB_ENV"
+      - name: Build
+        shell: bash
+        run: pyb -E ci -v -X analyze publish install $PYB_UPLOAD
