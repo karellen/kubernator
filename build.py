@@ -1,8 +1,20 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright 2021 © Payperless
+#   Copyright 2020 Express Systems USA, Inc
+#   Copyright 2021 Karellen, Inc.
 #
-
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
 
 from pybuilder.core import (use_plugin, init, Author)
 
@@ -13,15 +25,16 @@ name = "kubernator"
 version = "0.0.1.dev"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
-authors = [Author("Arcadiy Ivanov", "arcadiy@karellen.co")]
-maintainers = [Author("Arcadiy Ivanov", "arcadiy@karellen.co")]
+authors = [Author("Payperless")]
+maintainers = [Author("Karellen, Inc.", "supervisor@karellen.co")]
+
 url = "https://github.com/karellen/kubernator"
 urls = {
-    "Bug Tracker": "https://github.com/karellen/kubernator/-/issues",
-    "Source Code": "https://github.com/karellen/kubernator",
-    "Documentation": "https://github.com/karellen/kubernator"
+    "Bug Tracker": "https://github.com/karellen/kubernator/issues",
+    "Source Code": "https://github.com/karellen/kubernator/",
+    "Documentation": "https://github.com/karellen/kubernator/"
 }
-license = "Proprietary"
+license = "Apache License, Version 2.0"
 
 requires_python = ">=3.9"
 
@@ -52,7 +65,8 @@ def set_properties(project):
     project.include_file("kubernator", "LICENSE")
 
     project.set_property("distutils_console_scripts", ["kubernator = kubernator:main"])
-    project.set_property("distutils_setup_keywords", ["kubernetes", "k8s", "kube", "top", "provisioning"])
+    project.set_property("distutils_setup_keywords", ["kubernetes", "k8s", "kube", "top", "provisioning",
+                                                      "kOps", "terraform", "tf", "AWS"])
 
     project.set_property("distutils_classifiers", [
         "License :: OSI Approved :: Apache Software License",

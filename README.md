@@ -1,12 +1,34 @@
 # Kubernator
 
-Kubernator (Ktor) is an integrated solution for the Kubernetes state management. It operates on the directories, 
-processing their content via a collection of plugins, generating Kubernetes resources in the process, validating them, 
+Kubernator™ (Ktor™) is an integrated solution for the Kubernetes state management. It operates on directories,
+processing their content via a collection of plugins, generating Kubernetes resources in the process, validating them,
 transforming them and then applying against the Kubernetes cluster.
+
+## Notices
+
+### License
+
+The product is licensed under the Apache License, Version 2.0. Please see LICENSE for further details.
+
+### Warranties and Liability
+
+Kubernator and its plugins are provided on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied,
+including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR
+A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing
+Kubernator and assume any risks associated with doing so.
+
+### Trademarks
+
+"Kubernator" and "Ktor" are trademarks or registered trademarks of Express Systems USA, Inc and Karellen, Inc. All other
+trademarks are property of their respective owners.
+
+## Problem Statement
+
+## Solution
 
 ## Mode of Operation
 
-Kubernator is a command line utility. Upon startup and processing of the command line arguments and initializing 
+Kubernator is a command line utility. Upon startup and processing of the command line arguments and initializing
 logging, Kubernator initializes plugins. Current plugins include:
 
 0. Kubernator App
@@ -24,12 +46,12 @@ The entire application operates in the following stages by invoking each plugin'
 2. Pre-start script (if specified)
 3. Plugin Start Stage
 4. For each directory in the pipeline:
-   1. Plugin Before Directory Stage
-   2. If `.kubernator.py` is present in the directory: 
-      1. Plugin Before Script Stage
-      2. `.kubernator.py` script
-      3. Plugin After Script Stage
-   3. Plugin After Directory Stage
+    1. Plugin Before Directory Stage
+    2. If `.kubernator.py` is present in the directory:
+        1. Plugin Before Script Stage
+        2. `.kubernator.py` script
+        3. Plugin After Script Stage
+    3. Plugin After Directory Stage
 5. Plugin End Stage
 
 Each plugin individually plays a specific role and performs a specific function which will be described in a later
@@ -38,16 +60,16 @@ section.
 ## State/Context
 
 There is a global state that is carried through as the application is running. It is a hierarchy of objects (`context`)
-that follows the parent-child relationship as the application traverses the directory structure.
-For example, given the directory structure `/a/b`, `/a/c`, and `/a/c/d` any value of the context set or modified in
-context scoped to directory `/a` is visible in directories `/a/b`, `/a/c` and `/a/c/d`, while the same modified or
-set in `/a/b` is only visible there, while one in `/a/c` is visible in `/a/c` and in `/a/c/d` but not `/a` or `/a/b`.
+that follows the parent-child relationship as the application traverses the directory structure. For example, given the
+directory structure `/a/b`, `/a/c`, and `/a/c/d` any value of the context set or modified in context scoped to
+directory `/a` is visible in directories `/a/b`, `/a/c` and `/a/c/d`, while the same modified or set in `/a/b` is only
+visible there, while one in `/a/c` is visible in `/a/c` and in `/a/c/d` but not `/a` or `/a/b`.
 
 Additionally, there is a `context.globals` which is the top-most context that is available in all stages that are not
 associated with the directory structure.
 
 Note, that in cases where the directory structure traversal moves to remote directories (that are actualized by local
-temporary directories), such remote directory structure enters the context hierarchy as a child of the directory in 
+temporary directories), such remote directory structure enters the context hierarchy as a child of the directory in
 which remote was registered.
 
 Also note, that context carries not just data by references to essential functions.
@@ -61,14 +83,14 @@ In pre-start and `.kubernator.py` scripts the context is fully available as a gl
 The role of the Kubernator App Plugin is to traverse the directory structure, expose essential functions through context
 and to run Kubernator scripts.
 
-In the *After Directory Stage* Kubernator app scans the directories immediately available in the current, sorts them
-in the alphabetic order, excludes those matching any of the patterns in `context.app.excludes` and then queues up the 
-remaining directories in the order the match the patterns in `context.app.includes`. 
+In the *After Directory Stage* Kubernator app scans the directories immediately available in the current, sorts them in
+the alphabetic order, excludes those matching any of the patterns in `context.app.excludes` and then queues up the
+remaining directories in the order the match the patterns in `context.app.includes`.
 
-Thus, for a directory content `/a/foo`, `/a/bal`, `/a/bar`, `/a/baz`, excludes `f*`, and includes `baz` and `*`, 
-the resulting queue of directories to traverse will be `/a/baz`, `/a/bal`, `/a/bar`.
+Thus, for a directory content `/a/foo`, `/a/bal`, `/a/bar`, `/a/baz`, excludes `f*`, and includes `baz` and `*`, the
+resulting queue of directories to traverse will be `/a/baz`, `/a/bal`, `/a/bar`.
 
-Notice, that user can further interfere with processing order of the directory queue by asking Kubernator to walk 
+Notice, that user can further interfere with processing order of the directory queue by asking Kubernator to walk
 arbitrary paths, both local and remote.
 
 ##### Context
@@ -79,20 +101,20 @@ arbitrary paths, both local and remote.
   > Immediately schedules the paths to be traversed after the current directory by adding them to the queue
   > Relative path is relative to the current directory
 * `ktor.app.walk_remote(repo, *path_prefixes: Union[Path, str, bytes])`
-  > Immediately schedules the path prefixes under the remote repo URL to be traversed after the current directory by 
+  > Immediately schedules the path prefixes under the remote repo URL to be traversed after the current directory by
   > adding them to the queue. Only Git URLs are currently supported.
   > All absolute path prefixes are relativized based on the repository.
 * `ktor.app.repository_credentials_provider(func: Callable)`
   > Sets a repository credentials provider function `func` that sets/overwrites credentials for URLs being specified by
   > `walk_remote`. The callable `func` accepts a single argument containing a parsed URL in a form of tuple. The `func`
-  > is expected to return a tuple of three elements representing URL schema, username and password. If the value should 
+  > is expected to return a tuple of three elements representing URL schema, username and password. If the value should
   > not be changed it should be None. To convert from `git://repo.com/hello` to HTTPS authentication one should write
-  > a function returning `("https", "username", "password")`. The best utility is achieved by logic that allows running 
+  > a function returning `("https", "username", "password")`. The best utility is achieved by logic that allows running
   > the plan both in CI and local environments using different authentication mechanics in different environments.
 
 #### Terraform
 
-This is exclusively designed to pull the configuration options out of Terraform and to allow scripts and plugins to 
+This is exclusively designed to pull the configuration options out of Terraform and to allow scripts and plugins to
 utilize that data.
 
 ##### Context
@@ -100,29 +122,23 @@ utilize that data.
 * `ktor.tf`
   > A dictionary containing the values from Terraform output
 
-
 #### Kops
 
 ##### Context
-
 
 #### Kubernetes
 
 ##### Context
 
-
 #### Helm
 
 ##### Context
-
 
 #### Templates
 
 ##### Context
 
-
 ## Examples
-
 
 ### Adding Remote Directory
 
