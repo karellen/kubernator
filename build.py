@@ -24,7 +24,7 @@ use_plugin("pypi:karellen_pyb_plugin", ">=0.0.1")
 use_plugin("python.coveralls")
 
 name = "kubernator"
-version = "0.0.1.dev"
+version = "0.0.1"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
@@ -77,6 +77,7 @@ def set_properties(project):
     project.set_property("distutils_classifiers", [
         "License :: OSI Approved :: Apache Software License",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "Operating System :: MacOS :: MacOS X",
         "Operating System :: POSIX",
         "Operating System :: POSIX :: Linux",
