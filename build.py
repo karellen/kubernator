@@ -24,7 +24,7 @@ use_plugin("pypi:karellen_pyb_plugin", ">=0.0.1")
 use_plugin("python.coveralls")
 
 name = "kubernator"
-version = "0.0.1"
+version = "1.0.0.dev"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
