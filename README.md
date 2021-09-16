@@ -4,7 +4,23 @@ Kubernator™ (Ktor™) is an integrated solution for the Kubernetes state manag
 processing their content via a collection of plugins, generating Kubernetes resources in the process, validating them,
 transforming them and then applying against the Kubernetes cluster.
 
+[![Gitter](https://img.shields.io/gitter/room/karellen/lobby?logo=gitter)](https://gitter.im/karellen/Lobby)
+[![Build Status](https://img.shields.io/github/workflow/status/karellen/kubernator/kubernator/master)](https://github.com/karellen/kubernator/actions/workflows/kubernator.yml)
+[![Coverage Status](https://img.shields.io/coveralls/github/karellen/kubernator/master?logo=coveralls)](https://coveralls.io/r/karellen/kubernator?branch=master)
+
+[![Kubernator Version](https://img.shields.io/pypi/v/kubernator?logo=pypi)](https://pypi.org/project/kubernator/)
+[![Kubernator Python Versions](https://img.shields.io/pypi/pyversions/kubernator?logo=pypi)](https://pypi.org/project/kubernator/)
+[![Kubernator Downloads Per Day](https://img.shields.io/pypi/dd/kubernator?logo=pypi)](https://pypi.org/project/kubernator/)
+[![Kubernator Downloads Per Week](https://img.shields.io/pypi/dw/kubernator?logo=pypi)](https://pypi.org/project/kubernator/)
+[![Kubernator Downloads Per Month](https://img.shields.io/pypi/dm/kubernator?logo=pypi)](https://pypi.org/project/kubernator/)
+
 ## Notices
+
+### Beta Software
+
+While fully functional in the current state and used in production, this software is in **EARLY BETA**. A lot of things
+are expected to change rapidly, including main APIs, initialization procedures and some core features. Documentation at
+this stage is basically non-existent.
 
 ### License
 
@@ -12,10 +28,10 @@ The product is licensed under the Apache License, Version 2.0. Please see LICENS
 
 ### Warranties and Liability
 
-Kubernator and its plugins are provided on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied,
-including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR
-A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing
-Kubernator and assume any risks associated with doing so.
+Kubernator and its plugins are provided on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT,
+MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of
+using or redistributing Kubernator and assume any risks associated with doing so.
 
 ### Trademarks
 
