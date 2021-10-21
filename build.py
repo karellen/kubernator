@@ -24,7 +24,7 @@ use_plugin("pypi:karellen_pyb_plugin", ">=0.0.1")
 use_plugin("python.coveralls")
 
 name = "kubernator"
-version = "1.0.0.dev"
+version = "0.0.2"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
@@ -57,6 +57,7 @@ def set_properties(project):
     project.depends_on("jsonpath-ng", "~=1.5")
     project.depends_on("jinja2", "~=2.11")
     project.depends_on("coloredlogs", "~=15.0")
+    project.depends_on("jsonschema", "<4.0")
 
     project.set_property("coverage_break_build", False)
     project.set_property("cram_fail_if_no_tests", False)
