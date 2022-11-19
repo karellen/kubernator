@@ -42,7 +42,7 @@ from jinja2 import (Environment,
                     ChainableUndefined,
                     make_logging_undefined,
                     Template as JinjaTemplate,
-                    contextfunction)
+                    pass_context)
 from jsonschema import validators
 
 _CACHE_HEADER_TRANSLATION = {"etag": "if-none-match",
@@ -327,7 +327,7 @@ class TemplateEngine:
             base=CollectingUndefined
         )
 
-        @contextfunction
+        @pass_context
         def variable_finalizer(ctx, value):
             normalized_value = str(value)
             if self.VARIABLE_START_STRING in normalized_value and self.VARIABLE_END_STRING in normalized_value:
