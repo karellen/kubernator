@@ -24,7 +24,7 @@ use_plugin("pypi:karellen_pyb_plugin", ">=0.0.1")
 use_plugin("python.coveralls")
 
 name = "kubernator"
-version = "0.0.2"
+version = "0.0.3.dev"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
@@ -55,7 +55,7 @@ def set_properties(project):
     project.depends_on("requests", "~=2.25")
     project.depends_on("jsonpatch", "~=1.32")
     project.depends_on("jsonpath-ng", "~=1.5")
-    project.depends_on("jinja2", "~=2.11")
+    project.depends_on("jinja2", "~=3.1")
     project.depends_on("coloredlogs", "~=15.0")
     project.depends_on("jsonschema", "<4.0")
 
@@ -79,6 +79,7 @@ def set_properties(project):
         "License :: OSI Approved :: Apache Software License",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "Operating System :: MacOS :: MacOS X",
         "Operating System :: POSIX",
         "Operating System :: POSIX :: Linux",
