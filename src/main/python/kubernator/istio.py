@@ -74,11 +74,13 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         version_out: str = context.app.run_capturing_out(self.istio_stanza + ["version", "-o", "json"],
                                                          stderr_logger)
 
-        version = json.loads(version_out)["clientVersion"]["version"]
+        version_out_js = json.loads(version_out)
+        version = version_out_js["clientVersion"]["version"]
         logger.info("Found Istio client version %s", version)
 
-        self.client_version = version.split(".")
-        mesh_versions = set(m.value.split(".") for m in MESH_PILOT_JP.find(version_out))
+        self.client_version = tuple(version.split("."))
+        mesh_versions = set(tuple(m.value.split(".")) for m in MESH_PILOT_JP.find(version_out_js))
+
         if mesh_versions:
             self.server_version = max(mesh_versions)
 
@@ -141,7 +143,9 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
             if context.app.args.command == "apply":
                 logger.info("Running Istio precheck")
-                context.app.run(self.istio_stanza + ["x", "precheck", "-f", operators_file.name],
+                context.app.run(self.istio_stanza + ["x", "precheck"],
+                                stdout_logger, stderr_logger).wait()
+                context.app.run(self.istio_stanza + ["validate", "-f", operators_file.name],
                                 stdout_logger, stderr_logger).wait()
 
                 self._operator_init(operators_file, True)
