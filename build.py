@@ -24,7 +24,7 @@ use_plugin("pypi:karellen_pyb_plugin", ">=0.0.1")
 use_plugin("python.coveralls")
 
 name = "kubernator"
-version = "0.0.3"
+version = "0.0.4"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
@@ -93,6 +93,7 @@ def set_properties(project):
         "Intended Audience :: Developers",
         "Development Status :: 4 - Beta"
     ])
+    project.set_property('pybuilder_header_plugin_break_build', False)
     project.set_property("pybuilder_header_plugin_expected_header",
                          textwrap.dedent("""\
                          # -*- coding: utf-8 -*-

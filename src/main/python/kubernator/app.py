@@ -282,7 +282,7 @@ class App(KubernatorPlugin):
                            default_includes=Globs(context.app.default_includes),
                            default_excludes=Globs(context.app.default_excludes),
                            includes=Globs(context.app.default_includes),
-                           excludes=Globs(context.app.default_includes),
+                           excludes=Globs(context.app.default_excludes),
                            )
 
     def handle_before_dir(self, cwd: Path):

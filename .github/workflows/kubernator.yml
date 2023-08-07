@@ -20,7 +20,7 @@ jobs:
           - '3.10'
           - '3.9'
     env:
-      DEPLOY_PYTHONS: "3.10"
+      DEPLOY_PYTHONS: "3.11"
       DEPLOY_OSES: "Linux"
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TWINE_USERNAME: __token__
