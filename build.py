@@ -93,6 +93,7 @@ def set_properties(project):
         "Intended Audience :: Developers",
         "Development Status :: 4 - Beta"
     ])
+    project.set_property('pybuilder_header_plugin_break_build', False)
     project.set_property("pybuilder_header_plugin_expected_header",
                          textwrap.dedent("""\
                          # -*- coding: utf-8 -*-
