@@ -5,7 +5,7 @@ processing their content via a collection of plugins, generating Kubernetes reso
 transforming them and then applying against the Kubernetes cluster.
 
 [![Gitter](https://img.shields.io/gitter/room/karellen/lobby?logo=gitter)](https://gitter.im/karellen/Lobby)
-[![Build Status](https://img.shields.io/github/workflow/status/karellen/kubernator/kubernator/master)](https://github.com/karellen/kubernator/actions/workflows/kubernator.yml)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/karellen/kubernator/kubernator.yml?branch=master)](https://github.com/karellen/kubernator/actions/workflows/kubernator.yml)
 [![Coverage Status](https://img.shields.io/coveralls/github/karellen/kubernator/master?logo=coveralls)](https://coveralls.io/r/karellen/kubernator?branch=master)
 
 [![Kubernator Version](https://img.shields.io/pypi/v/kubernator?logo=pypi)](https://pypi.org/project/kubernator/)
