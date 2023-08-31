@@ -17,8 +17,10 @@
 #
 
 import argparse
+import configparser
 import datetime
 import logging
+import os
 import sys
 import urllib.parse
 from collections import deque
@@ -211,6 +213,37 @@ class App(KubernatorPlugin):
 
         self._run_handlers(KubernatorPlugin.handle_verify, True, context)
 
+    def discover_plugins(self):
+        """
+        Dynamically discovers plugins to use. Specific plugins can be provided in a file
+        '.kubernator.conf' with a plugins section.
+        If the file is not present, all plugins are discovered.
+        If the file is present, only the plugins listed are discovered.
+        For e.g
+        $ cat .kubernator.conf
+        # discoverable plugins
+        [plugins]
+          terraform
+          kops
+        """
+        config_file = ".kubernator.conf"
+        config = configparser.ConfigParser(allow_no_value=True)
+        plugin_list: list[KubernatorPlugin] = []
+
+        if not os.path.isfile(config_file):
+            # all known plugins
+            all_plugins = ([cls for cls in KubernatorPlugin.__subclasses__() if cls.__name__ != 'App'])
+            for plugin in all_plugins:
+                plugin_list.append(plugin())
+        else:
+            config.read(config_file)
+            for pluginName in config['plugins']:
+                plugin_class = [cls for cls in KubernatorPlugin.__subclasses__() if
+                                cls.__name__ == pluginName.capitalize() + 'Plugin']
+                plugin_list.append(plugin_class[0]())
+        logger.info("Discovered plugins: %s", plugin_list)
+        return plugin_list
+
     def register_plugin(self, handler: KubernatorPlugin):
         self._plugins.append(handler)
         logger.debug("Registered handler %r", handler)
@@ -387,12 +420,10 @@ def main():
 
     try:
         with App(args) as app:
-            app.register_plugin(TerraformPlugin())
-            app.register_plugin(KopsPlugin())
-            app.register_plugin(KubernetesPlugin())
-            app.register_plugin(IstioPlugin())
-            app.register_plugin(HelmPlugin())
-            app.register_plugin(TemplatePlugin())
+            discovered_plugins = app.discover_plugins()
+            # TODO refactor register_plugin to take a list
+            for plugin in discovered_plugins:
+                app.register_plugin(plugin)
             app.run()
     except SystemExit as e:
         return e.code
