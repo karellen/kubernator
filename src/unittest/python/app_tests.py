@@ -15,6 +15,12 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 #
+
+from gevent.monkey import patch_all, is_anything_patched
+
+if not is_anything_patched():
+    patch_all()
+
 import itertools
 import os
 import unittest
