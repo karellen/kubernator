@@ -30,13 +30,13 @@ from typing import Optional, Union
 
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, ValueDict, config_as_dict, config_parent,
                             Repository)
-# from kubernator.helm import HelmPlugin
-# from kubernator.istio import IstioPlugin
-# from kubernator.k8s import KubernetesPlugin
-# from kubernator.kops import KopsPlugin
-# from kubernator.proc import run, run_capturing_out
-# from kubernator.template import TemplatePlugin
-# from kubernator.tf import TerraformPlugin
+from kubernator.helm import HelmPlugin
+from kubernator.istio import IstioPlugin
+from kubernator.k8s import KubernetesPlugin
+from kubernator.kops import KopsPlugin
+from kubernator.proc import run, run_capturing_out
+from kubernator.template import TemplatePlugin
+from kubernator.tf import TerraformPlugin
 
 TRACE = 5
 
@@ -216,17 +216,17 @@ class App(KubernatorPlugin):
     def discover_plugins(self):
         """
         Dynamically discovers plugins to use. Specific plugins can be provided in a file
-        '.kubernator.conf' with a plugins section.
+        '.kubernator.conf.py' with a plugins section.
         If the file is not present, all plugins are discovered.
         If the file is present, only the plugins listed are discovered.
         For e.g
-        $ cat .kubernator.conf
+        $ cat .kubernator.conf.py
         # discoverable plugins
         [plugins]
           terraform
           kops
         """
-        config_file = ".kubernator.conf"
+        config_file = str(self.next()) + '/.kubernator.conf.py'
         config = configparser.ConfigParser(allow_no_value=True)
         plugin_list: list[KubernatorPlugin] = []
 

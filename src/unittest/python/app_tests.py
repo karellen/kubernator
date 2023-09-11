@@ -15,6 +15,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 #
+import tempfile
+from collections import deque
 
 from gevent.monkey import patch_all, is_anything_patched
 
@@ -27,8 +29,9 @@ import unittest
 import configparser
 from unittest.mock import Mock
 
-from kubernator.api import KubernatorPlugin
+from kubernator.api import KubernatorPlugin, ValueDict
 from kubernator.app import App
+from pathlib import Path
 
 
 class DefaultDiscoveryTestCase(unittest.TestCase):
@@ -44,21 +47,26 @@ class DefaultDiscoveryTestCase(unittest.TestCase):
 
 
 class SelectiveDiscoveryTestCase(unittest.TestCase):
-    def setUp(self) -> None:
+    tmpdirname = tempfile.TemporaryDirectory()
+
+    def setUp(self, tmpdirname=tmpdirname) -> None:
         config = configparser.ConfigParser(allow_no_value=True)
-        plugins = {'terraform': None,
-                   'kops': None,
-                   'kubernetes': None}
+        plugins = {'  terraform': None,
+                   '  kops': None,
+                   '  kubernetes': None}
         config['plugins'] = plugins
-        with open('.kubernator.conf', 'w') as configfile:
+        file = str(tmpdirname.name) + '/.kubernator.conf.py'
+        with open(file, 'w') as configfile:
             config.write(configfile)
 
-    def tearDown(self) -> None:
-        os.remove('.kubernator.conf')
+    def tearDown(self, tmpdirname=tmpdirname) -> None:
+        tmpdirname.cleanup()
 
-    def test_selective_plugin_discovery(self):
+    def test_selective_plugin_discovery(self, tmpdirname=tmpdirname):
         app = App(Mock())
         expected: list[KubernatorPlugin] = []
+        path = Path(tmpdirname.name)
+        app.path_q: deque[tuple[ValueDict, Path]] = deque(((ValueDict(_parent=app.context), path),))
         for plugin in ['TerraformPlugin', 'KopsPlugin', 'KubernetesPlugin']:
             selected_plugin = [cls for cls in KubernatorPlugin.__subclasses__() if cls.__name__ == plugin]
             expected.append(selected_plugin[0]())
@@ -66,9 +74,11 @@ class SelectiveDiscoveryTestCase(unittest.TestCase):
         for (actual_class, expected_class) in itertools.zip_longest(actual, expected):
             self.assertEqual(type(actual_class), type(expected_class))
 
-    def test_register_selective_plugins(self):
+    def test_register_selective_plugins(self, tmpdirname=tmpdirname):
         app = App(Mock())
         expected: list[KubernatorPlugin] = []
+        path = Path(tmpdirname.name)
+        app.path_q: deque[tuple[ValueDict, Path]] = deque(((ValueDict(_parent=app.context), path),))
         for plugin in ['TerraformPlugin', 'KopsPlugin', 'KubernetesPlugin']:
             selected_plugin = [cls for cls in KubernatorPlugin.__subclasses__() if cls.__name__ == plugin]
             expected.append(selected_plugin[0]())
