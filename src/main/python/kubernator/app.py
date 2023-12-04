@@ -268,7 +268,7 @@ class App(KubernatorPlugin):
                                    repository_credentials_provider=self._repository_credentials_provider,
                                    walk_remote=self.walk_remote,
                                    walk_local=self.walk_local,
-                                   register_plugin=self.register_plugin,
+                                   register_plugin=lambda *args, **kwargs: True,
                                    config_as_dict=config_as_dict,
                                    config_parent=config_parent,
                                    register_cleanup=self.register_cleanup,
