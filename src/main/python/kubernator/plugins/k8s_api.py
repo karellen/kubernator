@@ -561,7 +561,7 @@ class K8SResourcePluginMixin:
 
     def add_remote_resources(self, url: str, file_type: FileType, *, sub_category: Optional[str] = None,
                              source: str = None):
-        manifests = load_remote_file(self.logger, url, file_type, sub_category)
+        manifests = load_remote_file(self.logger, url, file_type, sub_category=sub_category)
 
         return [self.add_resource(m, source or url) for m in manifests if m]
 
@@ -572,7 +572,7 @@ class K8SResourcePluginMixin:
 
     def add_remote_crds(self, url: str, file_type: FileType, *, sub_category: Optional[str] = None,
                         source: str = None):
-        manifests = load_remote_file(self.logger, url, file_type, sub_category)
+        manifests = load_remote_file(self.logger, url, file_type, sub_category=sub_category)
 
         return [self.add_crd(m, source or url) for m in manifests if m]
 

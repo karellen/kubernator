@@ -22,6 +22,7 @@ from pybuilder.core import (use_plugin, init, Author)
 
 use_plugin("pypi:karellen_pyb_plugin", ">=0.0.1")
 use_plugin("python.coveralls")
+use_plugin("python.vendorize")
 
 name = "kubernator"
 version = "1.0.0.dev"
@@ -47,7 +48,7 @@ default_task = ["analyze", "publish"]
 @init
 def set_properties(project):
     project.depends_on("gevent", ">=21.1.2")
-    project.depends_on("kubernetes", "~=17.0")
+    project.depends_on("kubernetes", "~=28.0")
     project.depends_on("openapi-schema-validator", "~=0.1")
     project.depends_on("openapi-spec-validator", "~=0.3")
     project.depends_on("json-log-formatter", "~=0.3")
@@ -74,6 +75,12 @@ def set_properties(project):
     project.set_property("distutils_console_scripts", ["kubernator = kubernator:main"])
     project.set_property("distutils_setup_keywords", ["kubernetes", "k8s", "kube", "top", "provisioning",
                                                       "kOps", "terraform", "tf", "AWS"])
+
+    if False:
+        project.set_property("vendorize_target_dir", "$dir_source_main_python/kubernator/_vendor")
+        project.set_property("vendorize_packages", ["kubernetes~=28.0"])
+        project.set_property("vendorize_cleanup_globs", [])
+        project.set_property("vendorize_preserve_metadata", [])
 
     project.set_property("distutils_classifiers", [
         "License :: OSI Approved :: Apache Software License",

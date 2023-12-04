@@ -19,7 +19,6 @@
 
 import json
 import logging
-import os
 import re
 import sys
 import types
@@ -35,10 +34,10 @@ from kubernetes.client.rest import ApiException
 from kubernetes.config import load_incluster_config, load_kube_config, ConfigException
 
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, load_file, FileType, load_remote_file)
-from kubernator.k8s_api import (K8SResourcePluginMixin,
-                                K8SResource,
-                                K8SResourcePatchType,
-                                K8SPropagationPolicy)
+from kubernator.plugins.k8s_api import (K8SResourcePluginMixin,
+                                        K8SResource,
+                                        K8SResourcePatchType,
+                                        K8SPropagationPolicy)
 
 logger = logging.getLogger("kubernator.k8s")
 
@@ -60,16 +59,20 @@ def final_resource_validator(resources: Sequence[K8SResource],
 class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     logger = logger
 
+    name = "k8s"
+
     def __init__(self):
         super().__init__()
         self.context = None
-        self.k8s_client = None
 
         self._transformers = []
         self._validators = []
 
     def set_context(self, context):
         self.context = context
+
+    def register(self, **kwargs):
+        self.context.app.register_plugin("kubeconfig")
 
     def handle_init(self):
         context = self.context
@@ -103,42 +106,32 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         self.api_add_validator(final_resource_validator)
 
     def handle_start(self):
+        self.context.kubeconfig.register_change_notifier(self._kubeconfig_changed)
+        self.setup_client()
+
+    def _kubeconfig_changed(self):
+        self.setup_client()
+
+    def setup_client(self):
         context = self.context
-        self.k8s_client = self._setup_k8s_client()
-        context.globals.k8s.k8s_client = self.k8s_client
 
-        version = client.VersionApi(self.k8s_client).get_code()
-        logger.info("Found Kubernetes %s on %s", version.git_version, self.k8s_client.configuration.host)
+        context.k8s.client = self._setup_k8s_client()
+        version = client.VersionApi(context.k8s.client).get_code()
+        if "-eks-" in version.git_version:
+            git_version = version.git_version.split("-")[0]
+        else:
+            git_version = version.git_version
 
-        logger.debug("Reading Kubernetes OpenAPI spec for version %s", version.git_version)
+        logger.info("Found Kubernetes %s on %s", version.git_version, context.k8s.client.configuration.host)
 
-        if False:
-            def k8s_downloader(url, file_name, cache: dict):
-                try:
-                    response, _, headers = self.k8s_client.call_api("/openapi/v2",
-                                                                    "GET",
-                                                                    _preload_content=False,
-                                                                    header_params=cache)
-                    with open(file_name, "wb") as f:
-                        f.write(response.data)
-                    return headers
-                except ApiException as e:
-                    if e.status != 304:
-                        raise
-
-            k8s_def = load_remote_file(logger,
-                                       f"{self.k8s_client.configuration.host}/openapi/v2",
-                                       FileType.JSON,
-                                       downloader=k8s_downloader)
+        logger.debug("Reading Kubernetes OpenAPI spec for version %s", git_version)
 
         k8s_def = load_remote_file(logger, f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
-                                           f"{version.git_version}/api/openapi-spec/swagger.json",
+                                           f"{git_version}/api/openapi-spec/swagger.json",
                                    FileType.JSON)
         self.resource_definitions_schema = k8s_def
 
         self._populate_resource_definitions()
-
-        context.globals.k8s.client = self.k8s_client
 
     def handle_before_dir(self, cwd: Path):
         context = self.context
@@ -293,7 +286,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                         delete_func: Callable[[K8SPropagationPolicy], None],
                         status_msg):
         rdef = resource.rdef
-        rdef.populate_api(client, self.k8s_client)
+        rdef.populate_api(client, self.context.k8s.client)
 
         def create(exists_ok=False):
             logger.info("Creating resource %s%s%s", resource, status_msg,
@@ -388,7 +381,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         except ConfigException as e:
             logger.trace("K8S in-cluster configuration failed", exc_info=e)
             logger.debug("Initializing K8S with kubeconfig configuration")
-            load_kube_config(config_file=os.environ.get("KUBECONFIG", "~/.kube/config"))
+            load_kube_config(config_file=self.context.kubeconfig.kubeconfig)
 
         k8s_client = client.ApiClient()
 
@@ -404,7 +397,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         :return: Content-Type (e.g. application/json).
         """
 
-        content_type = self.k8s_client._select_header_content_type(content_types)
+        content_type = self.context.k8s.client._select_header_content_type(content_types)
         if content_type == "application/merge-patch+json":
             return "application/json-patch+json"
         return content_type

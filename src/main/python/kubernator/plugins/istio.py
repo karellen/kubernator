@@ -19,8 +19,10 @@
 import json
 import logging
 import os
+import tarfile
 import tempfile
 from pathlib import Path
+from shutil import which
 
 import yaml
 from jsonpath_ng.ext import parse as jp_parse
@@ -32,11 +34,14 @@ from kubernator.api import (KubernatorPlugin, scan_dir,
                             load_remote_file,
                             FileType,
                             StripNL,
-                            Globs)
-from kubernator.k8s import K8SResourcePluginMixin
+                            Globs,
+                            get_golang_os,
+                            get_golang_machine,
+                            prepend_os_path)
+from kubernator.plugins.k8s_api import K8SResourcePluginMixin
 
 logger = logging.getLogger("kubernator.istio")
-proc_logger = logger.getChild("istio")
+proc_logger = logger.getChild("proc")
 stdout_logger = StripNL(proc_logger.info)
 stderr_logger = StripNL(proc_logger.warning)
 
@@ -47,37 +52,82 @@ OBJECT_SCHEMA_VERSION = "1.20.6"
 
 class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     logger = logger
+    name = "istio"
 
     def __init__(self):
         self.context = None
         self.client_version = None
         self.server_version = None
         self.provision_operator = False
-        self.istio_stanza = ["istioctl"]
         self.template_engine = TemplateEngine(logger)
+
+        self.istioctl_dir = None
+
         super().__init__()
 
-    def set_context(self, context):
-        self.context = context
-
-    def handle_init(self):
+    def register(self, version=None):
         context = self.context
+        context.app.register_plugin("kubeconfig")
+        context.app.register_plugin("k8s")
+
+        if version:
+            # Download and use specific version
+            istioctl_url = (f"https://github.com/istio/istio/releases/download/{version}/"
+                            f"istioctl-{version}-{get_golang_os()}-{get_golang_machine()}.tar.gz")
+            istioctl_file_dl, _ = context.app.download_remote_file(logger, istioctl_url, "bin")
+            istioctl_file_dl = str(istioctl_file_dl)
+            self.istioctl_dir = tempfile.TemporaryDirectory()
+
+            istioctl_file = str(Path(self.istioctl_dir.name) / "istioctl")
+            istio_tar = tarfile.open(istioctl_file_dl)
+            istio_tar.extractall(self.istioctl_dir.name)
+
+            os.chmod(istioctl_file, 0o500)
+            prepend_os_path(str(self.istioctl_dir))
+        else:
+            # Use current version
+            istioctl_file = which("istioctl")
+            if not istioctl_file:
+                raise RuntimeError("`istioctl` cannot be found and no version has been specified")
+
+            logger.debug("Found istioctl in %r", istioctl_file)
+
         context.globals.istio = dict(
             default_includes=Globs(["*.istio.yaml", "*.istio.yml"], True),
             default_excludes=Globs([".*"], True),
+            istioctl_file=istioctl_file,
+            istioctl_stanza=self.istioctl_stanza,
+            test=self.test_istioctl
         )
 
-    def handle_start(self):
+    def test_istioctl(self):
         context = self.context
-        self.istio_stanza += ["--kubeconfig", os.environ.get("KUBECONFIG", os.path.expanduser("~/.kube/config"))]
-
-        version_out: str = context.app.run_capturing_out(self.istio_stanza + ["version", "-o", "json"],
+        version_out: str = context.app.run_capturing_out(context.istio.istioctl_stanza() + ["version", "-o", "json"],
                                                          stderr_logger)
 
         version_out_js = json.loads(version_out)
         version = version_out_js["clientVersion"]["version"]
+        logger.info("Using istioctl %r version %r with stanza %r",
+                    self.context.istio.istioctl_file, version, self.istioctl_stanza())
+
         logger.info("Found Istio client version %s", version)
 
+        return version, version_out_js
+
+    def set_context(self, context):
+        self.context = context
+
+    def istioctl_stanza(self):
+        context = self.context.istio
+        return [context.istioctl_file, f"--kubeconfig={self.context.kubeconfig.kubeconfig}"]
+
+    def handle_init(self):
+        pass
+
+    def handle_start(self):
+        context = self.context
+
+        version, version_out_js = self.test_istioctl()
         self.client_version = tuple(version.split("."))
         mesh_versions = set(tuple(m.value.split(".")) for m in MESH_PILOT_JP.find(version_out_js))
 
