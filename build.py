@@ -25,7 +25,7 @@ use_plugin("python.coveralls")
 use_plugin("python.vendorize")
 
 name = "kubernator"
-version = "1.0.0.dev"
+version = "1.0.0"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
