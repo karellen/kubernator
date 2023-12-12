@@ -92,6 +92,8 @@ TEMPLATE_VALIDATOR: Draft7Validator = TEMPLATE_VALIDATOR_CLS(TEMPLATE_SCHEMA, fo
 class TemplatePlugin(KubernatorPlugin):
     logger = logger
 
+    name = "templates"
+
     def __init__(self):
         self.context = None
 

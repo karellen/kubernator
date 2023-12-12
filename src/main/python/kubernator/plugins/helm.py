@@ -18,8 +18,12 @@
 
 import json
 import logging
+import os
+import tarfile
+import tempfile
 from hashlib import sha256
 from pathlib import Path
+from shutil import which, copy
 from typing import Sequence
 
 import yaml
@@ -30,11 +34,18 @@ from kubernator.api import (KubernatorPlugin, Globs, StripNL,
                             load_file,
                             FileType,
                             calling_frame_source,
-                            validator_with_defaults)
-from kubernator.k8s_api import K8SResource
+                            validator_with_defaults,
+                            get_golang_os,
+                            get_golang_machine,
+                            prepend_os_path
+                            )
+from kubernator.plugins.k8s_api import K8SResource
 from kubernator.proc import DEVNULL
 
 logger = logging.getLogger("kubernator.helm")
+proc_logger = logger.getChild("proc")
+stdout_logger = StripNL(proc_logger.info)
+stderr_logger = StripNL(proc_logger.warning)
 
 HELM_SCHEMA = {
     "properties": {
@@ -84,31 +95,68 @@ HELM_VALIDATOR = HELM_VALIDATOR_CLS(HELM_SCHEMA, format_checker=draft7_format_ch
 
 class HelmPlugin(KubernatorPlugin):
     logger = logger
-    proc_logger = logger.getChild("helm")
+
+    name = "helm"
 
     def __init__(self):
         self.context = None
         self.repositories = set()
-        self.helm_stanza = ["helm"]
+        self.helm_dir = None
 
     def set_context(self, context):
         self.context = context
 
-    def handle_init(self):
+    def helm_stanza(self):
         context = self.context
+        stanza = [context.helm.helm_file, f"--kubeconfig={context.kubeconfig.kubeconfig}"]
+        if logger.getEffectiveLevel() < logging.INFO:
+            stanza.append("--debug")
+        return stanza
+
+    def register(self, version=None):
+        context = self.context
+        context.app.register_plugin("kubeconfig")
+        context.app.register_plugin("k8s")
+
+        if version:
+            # Download and use specific version
+            helm_url = f"https://get.helm.sh/helm-v{version}-{get_golang_os()}-{get_golang_machine()}.tar.gz"
+            helm_file_dl, _ = context.app.download_remote_file(logger, helm_url, "bin")
+            helm_file_dl = str(helm_file_dl)
+            self.helm_dir = tempfile.TemporaryDirectory()
+
+            helm_file = str(Path(self.helm_dir.name) / "helm")
+            helm_tar = tarfile.open(helm_file_dl)
+            helm_tar.extractall(self.helm_dir.name)
+
+            copy(Path(self.helm_dir.name)/f"{get_golang_os()}-{get_golang_machine()}"/"helm", helm_file)
+
+            os.chmod(helm_file, 0o500)
+            prepend_os_path(str(self.helm_dir))
+        else:
+            # Use current version
+            helm_file = which("helm")
+            if not helm_file:
+                raise RuntimeError("`helm` cannot be found and no version has been specified")
+
+            logger.debug("Found Helm in %r", helm_file)
+
         context.globals.helm = dict(default_includes=Globs(["*.helm.yaml", "*.helm.yml"], True),
                                     default_excludes=Globs([".*"], True),
                                     namespace_transformer=True,
+                                    helm_file=helm_file,
+                                    helm_stanza=self.helm_stanza,
                                     add_helm_template=self.add_helm_template,
                                     add_helm=self.add_helm,
                                     )
 
-        if logger.getEffectiveLevel() < logging.INFO:
-            self.helm_stanza.append("--debug")
+    def handle_init(self):
+        version = self.context.app.run_capturing_out(self.helm_stanza() + ["version", "--template", "{{.Version}}"],
+                                                     logger.error)
+        logger.info("Found Helm version %s", version)
 
     def handle_start(self):
-        version = self.context.app.run_capturing_out(["helm", "version", "--template", "{{.Version}}"], logger.error)
-        logger.info("Found Helm version %s", version)
+        pass
 
     def handle_before_dir(self, cwd: Path):
         context = self.context
@@ -156,12 +204,12 @@ class HelmPlugin(KubernatorPlugin):
         logger.debug("Repository %s mapping to %s", repository, repository_hash)
         if repository_hash not in self.repositories:
             logger.info("Adding and updating repository %s mapping to %s", repository, repository_hash)
-            self.context.app.run(self.helm_stanza + ["repo", "add", repository_hash, repository],
-                                 StripNL(self.proc_logger.info),
-                                 StripNL(self.proc_logger.warning)).wait()
-            self.context.app.run(self.helm_stanza + ["repo", "update"],
-                                 StripNL(self.proc_logger.info),
-                                 StripNL(self.proc_logger.warning)).wait()
+            self.context.app.run(self.helm_stanza() + ["repo", "add", repository_hash, repository],
+                                 stdout_logger,
+                                 stderr_logger).wait()
+            self.context.app.run(self.helm_stanza() + ["repo", "update"],
+                                 stdout_logger,
+                                 stderr_logger).wait()
             self.repositories.add(repository_hash)
 
         return repository_hash
@@ -185,7 +233,7 @@ class HelmPlugin(KubernatorPlugin):
 
             stdin = write_stdin
 
-        resources = self.context.app.run_capturing_out(self.helm_stanza +
+        resources = self.context.app.run_capturing_out(self.helm_stanza() +
                                                        ["template",
                                                         name,
                                                         f"{repository_hash}/{chart}",
@@ -196,7 +244,7 @@ class HelmPlugin(KubernatorPlugin):
                                                        (["--include-crds"] if include_crds else []) +
                                                        (["-f", values_file] if values_file else []) +
                                                        (["-f", "-"] if values else []),
-                                                       StripNL(self.proc_logger.warning),
+                                                       stderr_logger,
                                                        stdin=stdin,
                                                        )
 

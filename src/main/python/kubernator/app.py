@@ -18,7 +18,9 @@
 
 import argparse
 import datetime
+import importlib
 import logging
+import pkgutil
 import sys
 import urllib.parse
 from collections import deque
@@ -26,15 +28,10 @@ from collections.abc import MutableMapping, Callable
 from pathlib import Path
 from typing import Optional, Union
 
-from kubernator.api import (KubernatorPlugin, Globs, scan_dir, ValueDict, config_as_dict, config_parent,
-                            Repository)
-from kubernator.helm import HelmPlugin
-from kubernator.istio import IstioPlugin
-from kubernator.k8s import KubernetesPlugin
-from kubernator.kops import KopsPlugin
+import kubernator
+from kubernator.api import (KubernatorPlugin, Globs, scan_dir, PropertyDict, config_as_dict, config_parent,
+                            download_remote_file, load_remote_file, Repository, StripNL)
 from kubernator.proc import run, run_capturing_out
-from kubernator.template import TemplatePlugin
-from kubernator.tf import TerraformPlugin
 
 TRACE = 5
 
@@ -72,8 +69,8 @@ def define_arg_parse():
                         help="in what format to generate results")
     parser.add_argument("-p", "--path", dest="path", default=".",
                         type=Path, help="path to start processing")
-    parser.add_argument("--pre-start-script", default=None, type=Path,
-                        help="location of the pre-start script")
+    #    parser.add_argument("--pre-start-script", default=None, type=Path,
+    #                        help="location of the pre-start script")
     #    parser.add_argument("--disconnected", action="store_true", default=False,
     #                        help="do not actually connect to the target Kubernetes")
     #    parser.add_argument("--k8s-version", type=str, default=None,
@@ -134,24 +131,28 @@ def init_logging(verbose, output_format, output_file):
 
 
 class App(KubernatorPlugin):
+    name = "app"
+
     def __init__(self, args):
         self.args = args
         path = args.path.absolute()
-        self._plugins: list[KubernatorPlugin] = []
 
-        global_context = ValueDict()
+        global_context = PropertyDict()
         global_context.globals = global_context
-        context = ValueDict(_parent=global_context)
+        context = PropertyDict(_parent=global_context)
+        context._plugins = []
+
         self._top_level_context = context
         self.context = context
+        self._top_dir_context = PropertyDict(_parent=self.context)
 
         self.repos: MutableMapping[Repository, Repository] = dict()
-        self.path_q: deque[tuple[ValueDict, Path]] = deque(((ValueDict(_parent=self.context), path),))
+        self.path_q: deque[tuple[PropertyDict, Path]] = deque(((self._top_dir_context, path),))
 
-        self._new_paths: list[tuple[ValueDict, Path]] = []
+        self._new_paths: list[tuple[PropertyDict, Path]] = []
 
         self._cleanups = []
-        self.register_plugin(self)
+        self._plugin_types = {}
 
     def __enter__(self):
         return self
@@ -160,23 +161,7 @@ class App(KubernatorPlugin):
         self.cleanup()
 
     def run(self):
-        context = self._top_level_context
-
-        # Init
-        self._run_handlers(KubernatorPlugin.handle_init, False, context)
-
-        # Pre-start
-        if self.args.pre_start_script:
-            for h in self._plugins:
-                h.set_context(context)
-
-            self._exec_ktor(self.args.pre_start_script)
-
-            for h in self._plugins:
-                h.set_context(None)
-
-        # Start
-        self._run_handlers(KubernatorPlugin.handle_start, False, context)
+        self.register_plugin(self)
 
         while True:
             cwd = self.next()
@@ -187,36 +172,91 @@ class App(KubernatorPlugin):
             context = self.context
 
             logger.debug("Inspecting directory %s", self._display_path(cwd))
-            self._run_handlers(KubernatorPlugin.handle_before_dir, False, context, cwd)
+            self._run_handlers(KubernatorPlugin.handle_before_dir, False, context, None, cwd)
 
             if (ktor_py := (cwd / ".kubernator.py")).exists():
-                self._run_handlers(KubernatorPlugin.handle_before_script, False, context, cwd)
+                self._run_handlers(KubernatorPlugin.handle_before_script, False, context, None, cwd)
 
-                for h in self._plugins:
+                for h in self.context._plugins:
                     h.set_context(context)
 
                 self._exec_ktor(ktor_py)
 
-                for h in self._plugins:
+                for h in self.context._plugins:
                     h.set_context(None)
 
-                self._run_handlers(KubernatorPlugin.handle_after_script, True, context, cwd)
+                self._run_handlers(KubernatorPlugin.handle_after_script, True, context, None, cwd)
 
-            self._run_handlers(KubernatorPlugin.handle_after_dir, True, context, cwd)
+            self._run_handlers(KubernatorPlugin.handle_after_dir, True, context, None, cwd)
 
-        self.context = self._top_level_context
+        self.context = self._top_dir_context
         context = self.context
 
-        self._run_handlers(KubernatorPlugin.handle_apply, True, context)
+        self._run_handlers(KubernatorPlugin.handle_apply, True, context, None)
 
-        self._run_handlers(KubernatorPlugin.handle_verify, True, context)
+        self._run_handlers(KubernatorPlugin.handle_verify, True, context, None)
 
-    def register_plugin(self, handler: KubernatorPlugin):
-        self._plugins.append(handler)
-        logger.debug("Registered handler %r", handler)
+        self._run_handlers(KubernatorPlugin.handle_shutdown, True, context, None)
 
-    def _run_handlers(self, f, reverse, context, *args, **kwargs):
-        f_name = f.__name__
+    def discover_plugins(self):
+        importlib.invalidate_caches()
+        search_path = Path(kubernator.__path__[0], "plugins")
+        [importlib.import_module(name)
+         for finder, name, is_pkg in
+         pkgutil.iter_modules([search_path], "kubernator.plugins.")]
+
+        for plugin in KubernatorPlugin.__subclasses__():
+            if plugin.name in self._plugin_types:
+                logger.warning("Plugin named %r in %r is already reserved by %r and will be ignored",
+                               plugin.name,
+                               plugin,
+                               self._plugin_types[plugin.name])
+            else:
+                logger.info("Plugin %r discovered in %r", plugin.name, plugin)
+                self._plugin_types[plugin.name] = plugin
+
+    def register_plugin(self, plugin: Union[KubernatorPlugin, type, str], **kwargs):
+        context = self.context
+        if isinstance(plugin, str):
+            try:
+                plugin_obj = self._plugin_types[plugin]()
+            except KeyError:
+                logger.critical("No known plugin with the name %r", plugin)
+                raise RuntimeError("No known plugin with the name %r" % (plugin,))
+        elif isinstance(plugin, type):
+            plugin_obj = plugin()
+        else:
+            plugin_obj = plugin
+
+        for p in context._plugins:
+            if p.name == plugin_obj.name:
+                logger.info("Plugin with name %r already registered, skipping", p.name)
+                return
+
+        logger.info("Registering plugin %r via %r", plugin_obj.name, plugin_obj)
+
+        # Register
+        self._run_handlers(KubernatorPlugin.register, False, context, plugin_obj, **kwargs)
+
+        context._plugins.append(plugin_obj)
+
+        # Init
+        self._run_handlers(KubernatorPlugin.handle_init, False, context, plugin_obj)
+
+        # Start
+        self._run_handlers(KubernatorPlugin.handle_start, False, context, plugin_obj)
+
+        # If we're already processing a directory
+        if "app" in self.context and "cwd" in self.context.app and self.context.app.cwd:
+            cwd = self.context.app.cwd
+            self._run_handlers(KubernatorPlugin.handle_before_dir, False, context, plugin_obj, cwd)
+
+            # If we're already in the script (TODO: is it possible to NOT be in a script?)
+            if "script" in self.context.app:
+                self._run_handlers(KubernatorPlugin.handle_before_script, False, context, plugin_obj, cwd)
+
+    def _run_handlers(self, __f, __reverse, __context, __plugin, *args, **kwargs):
+        f_name = __f.__name__
 
         def run(h):
             h_f = getattr(h, f_name, None)
@@ -224,10 +264,14 @@ class App(KubernatorPlugin):
                 logger.trace("Running %r handler on %r with %r, %r", f_name, h, args, kwargs)
                 h_f(*args, **kwargs)
 
-        self._set_handler_context(reverse, context, run)
+        if __plugin:
+            __plugin.set_context(__context)
+            run(__plugin)
+        else:
+            self._set_plugin_context(__reverse, __context, run)
 
-    def _set_handler_context(self, reverse, context, run):
-        for h in list(self._plugins if not reverse else reversed(self._plugins)):
+    def _set_plugin_context(self, reverse, context, run):
+        for h in list(self.context._plugins if not reverse else reversed(self.context._plugins)):
             h.set_context(context)
             run(h)
             h.set_context(None)
@@ -245,7 +289,7 @@ class App(KubernatorPlugin):
         logger.debug("Executed %r", ktor_py_display_path)
 
     def next(self) -> Path:
-        path_queue: deque[tuple[ValueDict, Path]] = self.path_q
+        path_queue: deque[tuple[PropertyDict, Path]] = self.path_q
         if path_queue:
             self.context, path = path_queue.pop()
             return path
@@ -259,6 +303,9 @@ class App(KubernatorPlugin):
         for h in self._cleanups:
             h.cleanup()
 
+    def register(self, **kwargs):
+        self.discover_plugins()
+
     def handle_init(self):
         context = self.context
 
@@ -271,10 +318,13 @@ class App(KubernatorPlugin):
                                    register_plugin=self.register_plugin,
                                    config_as_dict=config_as_dict,
                                    config_parent=config_parent,
+                                   download_remote_file=download_remote_file,
+                                   load_remote_file=load_remote_file,
                                    register_cleanup=self.register_cleanup,
                                    run=self._run,
                                    run_capturing_out=self._run_capturing_out,
                                    repository=self.repository,
+                                   StripNL=StripNL,
                                    default_includes=Globs(["*"], True),
                                    default_excludes=Globs([".*"], True),
                                    )
@@ -293,14 +343,26 @@ class App(KubernatorPlugin):
         app.cwd = cwd
         self._new_paths = []
 
+    def handle_before_script(self, cwd: Path):
+        context = self.context
+        app = context.app
+        app.script = (cwd / ".kubernator.py")
+
+    def handle_after_script(self, cwd: Path):
+        context = self.context
+        app = context.app
+        del app.script
+
     def handle_after_dir(self, cwd: Path):
         context = self.context
         app = context.app
 
         for f in scan_dir(logger, cwd, lambda d: d.is_dir(), app.excludes, app.includes):
-            self._new_paths.append((ValueDict(_parent=context), f))
+            self._new_paths.append((PropertyDict(_parent=context), f))
 
         self.path_q.extend(reversed(self._new_paths))
+
+        del app.cwd
 
     def repository(self, repo):
         repository = Repository(repo, self._repo_cred_augmentation)
@@ -308,19 +370,19 @@ class App(KubernatorPlugin):
             repository = self.repos[repository]
         else:
             self.repos[repository] = repository
-            repository.init(logger, self.context.app.run)
+            repository.init(logger, self.context)
             self.register_cleanup(repository)
 
         return repository
 
-    def walk_local(self, *paths: Union[Path, str, bytes]):
+    def walk_local(self, *paths: Union[Path, str, bytes], keep_context=False):
         for path in paths:
             p = Path(path)
             if not p.is_absolute():
                 p = self.context.app.cwd / p
-            self._add_local(p)
+            self._add_local(p, keep_context)
 
-    def walk_remote(self, repo, *path_prefixes: Union[Path, str, bytes]):
+    def walk_remote(self, repo, *path_prefixes: Union[Path, str, bytes], keep_context=False):
         repository = self.repository(repo)
 
         if path_prefixes:
@@ -328,22 +390,23 @@ class App(KubernatorPlugin):
                 path = Path(path_prefix)
                 if path.is_absolute():
                     path = Path(*path.parts[1:])
-                self._add_local(repository.local_dir / path)
+                self._add_local(repository.local_dir / path, keep_context)
         else:
-            self._add_local(repository.local_dir)
+            self._add_local(repository.local_dir, keep_context)
 
     def set_context(self, context):
         # We are managing the context for everyone so we don't actually set it anywhere
         pass
 
-    def _add_local(self, path: Path):
-        logger.info("Adding %s to the plan", self._display_path(path))
-        self._new_paths.append((ValueDict(_parent=self.context), path))
+    def _add_local(self, path: Path, keep_context=False):
+        logger.info("Adding %s to the plan%s", self._display_path(path),
+                    " (in parent context)" if keep_context else "")
+        self._new_paths.append((self.context if keep_context else PropertyDict(_parent=self.context), path))
 
     def _repository_credentials_provider(self,
                                          provider: Optional[
-                                             Callable[[urllib.parse.SplitResult],
-                                                      tuple[Optional[str], Optional[str], Optional[str]]]]):
+                                             Callable[[urllib.parse.SplitResult], tuple[
+                                                 Optional[str], Optional[str], Optional[str]]]]):
         self.context.app._repository_credentials_provider = provider
 
     def _repo_cred_augmentation(self, url):
@@ -387,12 +450,6 @@ def main():
 
     try:
         with App(args) as app:
-            app.register_plugin(TerraformPlugin())
-            app.register_plugin(KopsPlugin())
-            app.register_plugin(KubernetesPlugin())
-            app.register_plugin(IstioPlugin())
-            app.register_plugin(HelmPlugin())
-            app.register_plugin(TemplatePlugin())
             app.run()
     except SystemExit as e:
         return e.code

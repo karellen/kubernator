@@ -20,9 +20,9 @@ import fnmatch
 import json
 import logging
 import os
+import platform
 import re
 import sys
-import tempfile
 import traceback
 import urllib.parse
 from collections.abc import Callable
@@ -32,8 +32,9 @@ from hashlib import sha256
 from io import StringIO as io_StringIO
 from pathlib import Path
 from shutil import rmtree
+from subprocess import CalledProcessError
 from types import GeneratorType
-from typing import Optional, Union
+from typing import Optional, Union, MutableSequence
 
 import requests
 import yaml
@@ -110,16 +111,23 @@ def _download_remote_file(url, file_name, cache: dict):
             return dict(r.headers)
 
 
-def download_remote_file(logger, url: str, sub_category: str = None, downloader=_download_remote_file):
-    config_dir = Path(user_config_dir("kubernator")) / "k8s"
+def get_cache_dir(category: str, sub_category: str = None):
+    config_dir = Path(user_config_dir("kubernator")) / category
     if sub_category:
         config_dir = config_dir / sub_category
     if not config_dir.exists():
         config_dir.mkdir(parents=True)
 
+    return config_dir
+
+
+def download_remote_file(logger, url: str, category: str = "k8s", sub_category: str = None,
+                         downloader=_download_remote_file):
+    config_dir = get_cache_dir(category, sub_category)
+
     file_name = config_dir / sha256(url.encode("UTF-8")).hexdigest()
     cache_file_name = file_name.with_suffix(".cache")
-    logger.trace("Cache file for %s is %s(.cache)", url, file_name)
+    logger.trace("Cache file for %s is %s.cache", url, file_name)
 
     cache = {}
     if cache_file_name.exists():
@@ -133,8 +141,10 @@ def download_remote_file(logger, url: str, sub_category: str = None, downloader=
 
     logger.trace("Downloading %s into %s%s", url, file_name, " (caching)" if cache else "")
     headers = downloader(url, file_name, cache)
+    up_to_date = False
     if not headers:
-        logger.trace("File %s is up-to-date", file_name)
+        logger.trace("File %s(%s) is up-to-date", url, file_name.name)
+        up_to_date = True
     else:
         cache = {_CACHE_HEADER_TRANSLATION.get(k.lower(), k): v
                  for k, v in headers.items()
@@ -144,11 +154,12 @@ def download_remote_file(logger, url: str, sub_category: str = None, downloader=
         with open(cache_file_name, "wt") as cache_f:
             json.dump(cache, cache_f)
 
-    return file_name
+    return file_name, up_to_date
 
 
-def load_remote_file(logger, url, file_type: FileType, sub_category: str = None, downloader=_download_remote_file):
-    file_name = download_remote_file(logger, url, sub_category, downloader=downloader)
+def load_remote_file(logger, url, file_type: FileType, category: str = "k8s", sub_category: str = None,
+                     downloader=_download_remote_file):
+    file_name, _ = download_remote_file(logger, url, category, sub_category, downloader=downloader)
     logger.debug("Loading %s from %s using %s", url, file_name, file_type.name)
     return _load_file(logger, file_name, file_type, url)
 
@@ -172,33 +183,191 @@ def validator_with_defaults(validator_class):
     return validators.extend(validator_class, {"properties": set_defaults})
 
 
-class ValueDict:
+class _PropertyList(MutableSequence):
+
+    def __init__(self, seq, read_parent, name):
+        self.__read_seq = seq
+        self.__read_parent = read_parent
+        self.__write_parent = None
+        self.__write_seq = None
+        self.__name = name
+
+    def __iter__(self):
+        return self.__read_seq.__iter__()
+
+    def __mul__(self, __n):
+        return self.__read_seq.__mul__(__n)
+
+    def __rmul__(self, __n):
+        return self.__read_seq.__rmul__(__n)
+
+    def __imul__(self, __n):
+        return self.__read_seq.__imul__(__n)
+
+    def __contains__(self, __o):
+        return self.__read_seq.__contains__(__o)
+
+    def __reversed__(self):
+        return self.__read_seq.__reversed__()
+
+    def __gt__(self, __x):
+        return self.__read_seq.__gt__(__x)
+
+    def __ge__(self, __x):
+        return self.__read_seq.__ge__(__x)
+
+    def __lt__(self, __x):
+        return self.__read_seq.__lt__(__x)
+
+    def __le__(self, __x):
+        return self.__read_seq.__le__(__x)
+
+    def __len__(self):
+        return self.__read_seq.__len__()
+
+    def count(self, __value):
+        return self.__read_seq.count(__value)
+
+    def copy(self):
+        while True:
+            try:
+                return self.__write_seq.copy()
+            except AttributeError:
+                self.__clone()
+
+    def __getitem__(self, __i):
+        return self.__read_seq.__getitem__(__i)
+
+    def append(self, __object):
+        while True:
+            try:
+                return self.__write_seq.append(__object)
+            except AttributeError:
+                self.__clone()
+
+    def extend(self, __iterable):
+        while True:
+            try:
+                return self.__write_seq.extend(__iterable)
+            except AttributeError:
+                self.__clone()
+
+    def pop(self, __index=None):
+        while True:
+            try:
+                return self.__write_seq.pop(__index)
+            except AttributeError:
+                self.__clone()
+
+    def insert(self, __index, __object):
+        while True:
+            try:
+                return self.__write_seq.insert(__index, __object)
+            except AttributeError:
+                self.__clone()
+
+    def remove(self, __value):
+        while True:
+            try:
+                return self.__write_seq.remove(__value)
+            except AttributeError:
+                self.__clone()
+
+    def sort(self, *, key=None, reverse=False):
+        while True:
+            try:
+                return self.__write_seq.sort(key=key, reverse=reverse)
+            except AttributeError:
+                self.__clone()
+
+    def __setitem__(self, __i, __o):
+        while True:
+            try:
+                return self.__write_seq.__setitem__(__i, __o)
+            except AttributeError:
+                self.__clone()
+
+    def __delitem__(self, __i):
+        while True:
+            try:
+                return self.__write_seq.__delitem__(__i)
+            except AttributeError:
+                self.__clone()
+
+    def __add__(self, __x):
+        while True:
+            try:
+                return self.__write_seq.__add__(__x)
+            except AttributeError:
+                self.__clone()
+
+    def __iadd__(self, __x):
+        while True:
+            try:
+                return self.__write_seq.__iadd__(__x)
+            except AttributeError:
+                self.__clone()
+
+    def clear(self):
+        while True:
+            try:
+                return self.__write_seq.clear()
+            except AttributeError:
+                self.__clone()
+
+    def reverse(self):
+        while True:
+            try:
+                return self.__write_seq.reverse()
+            except AttributeError:
+                self.__clone()
+
+    def __clone(self):
+        if self.__read_parent == self.__write_parent:
+            self.__write_seq = self.__read_seq
+        else:
+            self.__write_seq = self.__read_seq.copy()
+            self.__read_seq = self.__write_seq
+
+            setattr(self.__write_parent, self.__name, self.__write_seq)
+
+
+class PropertyDict:
     def __init__(self, _dict=None, _parent=None):
-        self.__dict__["_ValueDict__dict"] = _dict or {}
-        self.__dict__["_ValueDict__parent"] = _parent
+        self.__dict__["_PropertyDict__dict"] = _dict or {}
+        self.__dict__["_PropertyDict__parent"] = _parent
 
     def __getattr__(self, item):
+        v = self.__getattr(item)
+        if isinstance(v, _PropertyList):
+            v._PropertyList__write_parent = self
+        return v
+
+    def __getattr(self, item):
         try:
-            return self.__dict[item]
+            v = self.__dict[item]
+            if isinstance(v, list):
+                v = _PropertyList(v, self, item)
+            return v
         except KeyError:
             parent = self.__parent
             if parent is not None:
-                return parent.__getattr__(item)
+                return parent.__getattr(item)
             raise AttributeError("no attribute %r" % item) from None
 
     def __setattr__(self, key, value):
-        if key.startswith("_ValueDict__"):
+        if key.startswith("_PropertyDict__"):
             raise AttributeError("prohibited attribute %r" % key)
         if isinstance(value, dict):
             parent_dict = None
             if self.__parent is not None:
                 try:
                     parent_dict = self.__parent.__getattr__(key)
-                    if not isinstance(parent_dict, ValueDict):
+                    if not isinstance(parent_dict, PropertyDict):
                         raise ValueError("cannot override a scalar with a synthetic object for attribute %s", key)
                 except AttributeError:
                     pass
-            value = ValueDict(value, _parent=parent_dict)
+            value = PropertyDict(value, _parent=parent_dict)
         self.__dict[key] = value
 
     def __delattr__(self, item):
@@ -216,6 +385,16 @@ class ValueDict:
     def __delitem__(self, key):
         self.__dict.__delitem__(key)
 
+    def __contains__(self, item):
+        try:
+            self.__dict[item]
+            return True
+        except KeyError:
+            parent = self.__parent
+            if parent is not None:
+                return parent.__contains__(item)
+            return False
+
     def __dir__(self) -> Iterable[str]:
         result: set[str] = set()
         result.update(self.__dict.keys())
@@ -224,18 +403,18 @@ class ValueDict:
         return result
 
     def __repr__(self):
-        return "ValueDict[%r]" % self.__dict
+        return "PropertyDict[%r]" % self.__dict
 
 
-def config_parent(config: ValueDict):
-    return config._ValueDict__parent
+def config_parent(config: PropertyDict):
+    return config._PropertyDict__parent
 
 
-def config_as_dict(config: ValueDict):
+def config_as_dict(config: PropertyDict):
     return {k: config[k] for k in dir(config)}
 
 
-def config_get(config: ValueDict, key: str, default=None):
+def config_get(config: PropertyDict, key: str, default=None):
     try:
         return config[key]
     except KeyError:
@@ -399,6 +578,37 @@ def clone_url_str(url):
     return urllib.parse.urlunsplit(url[:3] + ("", ""))  # no query or fragment
 
 
+def prepend_os_path(path):
+    paths = os.environ["PATH"].split(os.pathsep)
+    if path not in paths:
+        paths.insert(0, path)
+        os.environ["PATH"] = os.pathsep.join(paths)
+        return True
+    return False
+
+
+_GOLANG_MACHINE = platform.machine().lower()
+if _GOLANG_MACHINE == "x86_64":
+    _GOLANG_MACHINE = "amd64"
+
+_GOLANG_OS = platform.system().lower()
+
+
+def get_golang_machine():
+    return _GOLANG_MACHINE
+
+
+def get_golang_os():
+    return _GOLANG_OS
+
+
+def sha256_file_digest(path):
+    h = sha256()
+    with open(path, "rb") as f:
+        h.update(f.read(65535))
+    return h.hexdigest()
+
+
 class Repository:
     logger = logging.getLogger("kubernator.repository")
     git_logger = logger.getChild("git")
@@ -424,7 +634,10 @@ class Repository:
     def __hash__(self) -> int:
         return hash(self._hash_obj)
 
-    def init(self, logger, run):
+    def init(self, logger, context):
+        run = context.app.run
+        run_capturing_out = context.app.run_capturing_out
+
         url = self.url
         if self._cred_aug:
             url = self._cred_aug(url)
@@ -437,25 +650,55 @@ class Repository:
         if ref:
             self.ref = ref[0]
 
-        self.local_dir = Path(tempfile.mkdtemp())
-        self.logger.info("Initializing %s -> %s", self.url_str, self.local_dir)
-        args = (["git", "clone", "--depth", "1",
-                 "-" + ("v" * log_level_to_verbosity_count(logger.getEffectiveLevel()))] +
-                (["-b", self.ref] if self.ref else []) +
-                ["--", self.clone_url_str, self.local_dir])
-        safe_args = [c if c != self.clone_url_str else self.url_str for c in args]
-        proc = run(args, StripNL(self.git_logger.debug), StripNL(self.git_logger.info), safe_args=safe_args)
-        proc.wait()
+        config_dir = get_cache_dir("git")
+
+        git_cache = config_dir / sha256(self.clone_url_str.encode("UTF-8")).hexdigest()
+
+        if git_cache.exists() and git_cache.is_dir() and (git_cache / ".git").exists():
+            try:
+                proc = run(["git", "status"], None, None, cwd=git_cache)
+                proc.wait()
+            except CalledProcessError:
+                rmtree(git_cache)
+
+        self.local_dir = str(git_cache)
+
+        stdout_logger = StripNL(self.git_logger.debug)
+        stderr_logger = StripNL(self.git_logger.info)
+        if git_cache.exists():
+            if not self.ref:
+                ref = run_capturing_out(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
+                                        stderr_logger, cwd=git_cache)
+            else:
+                ref = self.ref
+            run(["git", "checkout", ref], stdout_logger, stderr_logger, cwd=git_cache).wait()
+            run(["git", "clean", "-f"], stdout_logger, stderr_logger, cwd=git_cache).wait()
+            run(["git", "reset", "--hard", ref], stdout_logger, stderr_logger, cwd=git_cache).wait()
+            run(["git", "pull"], stdout_logger, stderr_logger, cwd=git_cache).wait()
+        else:
+            self.logger.info("Initializing %s -> %s", self.url_str, self.local_dir)
+            args = (["git", "clone", "--depth", "1",
+                     "-" + ("v" * log_level_to_verbosity_count(logger.getEffectiveLevel()))] +
+                    (["-b", self.ref] if self.ref else []) +
+                    ["--", self.clone_url_str, self.local_dir])
+            safe_args = [c if c != self.clone_url_str else self.url_str for c in args]
+            proc = run(args, stdout_logger, stderr_logger, safe_args=safe_args)
+            proc.wait()
 
     def cleanup(self):
-        if self.local_dir:
+        if False and self.local_dir:
             self.logger.info("Cleaning up %s -> %s", self.url_str, self.local_dir)
             rmtree(self.local_dir)
 
 
 class KubernatorPlugin:
+    name = None
+
     def set_context(self, context):
         raise NotImplementedError
+
+    def register(self, **kwargs):
+        pass
 
     def handle_init(self):
         pass
@@ -479,4 +722,7 @@ class KubernatorPlugin:
         pass
 
     def handle_verify(self):
+        pass
+
+    def handle_shutdown(self):
         pass
