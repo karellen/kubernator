@@ -692,7 +692,7 @@ class Repository:
 
 
 class KubernatorPlugin:
-    name = None
+    _name = None
 
     def set_context(self, context):
         raise NotImplementedError

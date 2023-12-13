@@ -42,7 +42,7 @@ stderr_logger = StripNL(proc_logger.warning)
 class AwsCliPlugin(KubernatorPlugin):
     logger = logger
 
-    name = "awscli"
+    _name = "awscli"
 
     def __init__(self):
         self.context = None

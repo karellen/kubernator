@@ -16,6 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version:
+          - '3.12'
           - '3.11'
           - '3.10'
           - '3.9'
@@ -31,13 +32,28 @@ jobs:
           github.event_name == 'push' &&
           contains(env.DEPLOY_OSES, runner.os) &&
           contains(env.DEPLOY_PYTHONS, matrix.python-version)
+
         shell: bash
         run: echo "PYB_EXTRA_ARGS=+upload" >> "$GITHUB_ENV"
+
+      - name: Login to GitHub Container Registry for Upload
+        if: |
+          github.event_name == 'push' &&
+          contains(env.DEPLOY_OSES, runner.os) &&
+          contains(env.DEPLOY_PYTHONS, matrix.python-version)
+
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build with PyBuilder
         uses: pybuilder/build@master
         with:
           python-version: ${{ matrix.python-version }}
           pyb-extra-args: ${{ env.PYB_EXTRA_ARGS }}
+
   build-summary:
     if: success() || failure()
     runs-on: ubuntu-latest

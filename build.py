@@ -18,14 +18,16 @@
 
 import textwrap
 
-from pybuilder.core import (use_plugin, init, Author)
+from subprocess import check_call
+from pybuilder.core import (use_plugin, init, Author, task)
 
 use_plugin("pypi:karellen_pyb_plugin", ">=0.0.1")
 use_plugin("python.coveralls")
 use_plugin("python.vendorize")
+use_plugin("filter_resources")
 
 name = "kubernator"
-version = "1.0.0"
+version = "1.0.1"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
@@ -67,6 +69,8 @@ def set_properties(project):
 
     project.set_property("copy_resources_target", "$dir_dist/kubernator")
     project.get_property("copy_resources_glob").append("LICENSE")
+    project.set_property("filter_resources_target", "$dir_dist")
+    project.get_property("filter_resources_glob").append("kubernator/__init__.py")
     project.include_file("kubernator", "LICENSE")
 
     project.set_property("distutils_upload_sign", False)
@@ -121,3 +125,15 @@ def set_properties(project):
                          #   limitations under the License.
                          #
                          """))
+
+
+@task
+def publish(project):
+    image = f"ghcr.io/karellen/kubernator"
+    versioned_image = f"{image}:{project.dist_version}"
+    project.set_property("docker_image", image)
+    check_call(["docker", "build", "-t", versioned_image, "-t", f"{image}:latest", "."])
+
+@task
+def upload(project):
+    check_call(["docker", "push", project.get_property("docker_image"), "-a"])

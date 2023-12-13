@@ -39,7 +39,7 @@ stderr_logger = StripNL(proc_logger.warning)
 class KubectlPlugin(KubernatorPlugin):
     logger = logger
 
-    name = "kubectl"
+    _name = "kubectl"
 
     def __init__(self):
         self.context = None

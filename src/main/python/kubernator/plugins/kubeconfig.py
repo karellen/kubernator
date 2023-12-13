@@ -32,7 +32,7 @@ stderr_logger = StripNL(proc_logger.warning)
 class KubeConfigPlugin(KubernatorPlugin):
     logger = logger
 
-    name = "kubeconfig"
+    _name = "kubeconfig"
 
     def __init__(self):
         self.context = None

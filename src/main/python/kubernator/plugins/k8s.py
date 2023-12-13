@@ -59,7 +59,7 @@ def final_resource_validator(resources: Sequence[K8SResource],
 class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     logger = logger
 
-    name = "k8s"
+    _name = "k8s"
 
     def __init__(self):
         super().__init__()
