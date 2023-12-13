@@ -96,7 +96,7 @@ HELM_VALIDATOR = HELM_VALIDATOR_CLS(HELM_SCHEMA, format_checker=draft7_format_ch
 class HelmPlugin(KubernatorPlugin):
     logger = logger
 
-    name = "helm"
+    _name = "helm"
 
     def __init__(self):
         self.context = None

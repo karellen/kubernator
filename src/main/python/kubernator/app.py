@@ -57,6 +57,8 @@ logger = logging.getLogger("kubernator")
 def define_arg_parse():
     parser = argparse.ArgumentParser(description="Kubernetes Provisioning Tool",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--version", action="version", version=kubernator.__version__,
+                        help="print version and exit")
     parser.add_argument("--log-format", choices=["human", "json"], default="human",
                         help="whether to log for human or machine consumption")
     parser.add_argument("--log-file", type=argparse.FileType("w"), default=None,
@@ -131,7 +133,7 @@ def init_logging(verbose, output_format, output_file):
 
 
 class App(KubernatorPlugin):
-    name = "app"
+    _name = "app"
 
     def __init__(self, args):
         self.args = args
@@ -161,6 +163,8 @@ class App(KubernatorPlugin):
         self.cleanup()
 
     def run(self):
+        logger.info("Starting Kubernator version %s", kubernator.__version__)
+
         self.register_plugin(self)
 
         while True:
@@ -206,14 +210,14 @@ class App(KubernatorPlugin):
          pkgutil.iter_modules([search_path], "kubernator.plugins.")]
 
         for plugin in KubernatorPlugin.__subclasses__():
-            if plugin.name in self._plugin_types:
+            if plugin._name in self._plugin_types:
                 logger.warning("Plugin named %r in %r is already reserved by %r and will be ignored",
-                               plugin.name,
+                               plugin._name,
                                plugin,
-                               self._plugin_types[plugin.name])
+                               self._plugin_types[plugin._name])
             else:
-                logger.info("Plugin %r discovered in %r", plugin.name, plugin)
-                self._plugin_types[plugin.name] = plugin
+                logger.info("Plugin %r discovered in %r", plugin._name, plugin)
+                self._plugin_types[plugin._name] = plugin
 
     def register_plugin(self, plugin: Union[KubernatorPlugin, type, str], **kwargs):
         context = self.context
@@ -229,11 +233,11 @@ class App(KubernatorPlugin):
             plugin_obj = plugin
 
         for p in context._plugins:
-            if p.name == plugin_obj.name:
-                logger.info("Plugin with name %r already registered, skipping", p.name)
+            if p._name == plugin_obj._name:
+                logger.info("Plugin with name %r already registered, skipping", p._name)
                 return
 
-        logger.info("Registering plugin %r via %r", plugin_obj.name, plugin_obj)
+        logger.info("Registering plugin %r via %r", plugin_obj._name, plugin_obj)
 
         # Register
         self._run_handlers(KubernatorPlugin.register, False, context, plugin_obj, **kwargs)

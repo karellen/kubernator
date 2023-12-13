@@ -38,7 +38,7 @@ stderr_logger = StripNL(proc_logger.warning)
 class TerragruntPlugin(KubernatorPlugin):
     logger = logger
 
-    name = "terragrunt"
+    _name = "terragrunt"
 
     def __init__(self):
         self.context = None

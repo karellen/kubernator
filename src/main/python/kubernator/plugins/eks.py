@@ -33,7 +33,7 @@ stderr_logger = StripNL(proc_logger.warning)
 class EksPlugin(KubernatorPlugin):
     logger = logger
 
-    name = "eks"
+    _name = "eks"
 
     def __init__(self):
         self.context = None

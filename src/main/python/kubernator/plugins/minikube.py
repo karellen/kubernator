@@ -34,7 +34,7 @@ stderr_logger = StripNL(proc_logger.warning)
 class MinikubePlugin(KubernatorPlugin):
     logger = logger
 
-    name = "minikube"
+    _name = "minikube"
 
     def __init__(self):
         self.context = None

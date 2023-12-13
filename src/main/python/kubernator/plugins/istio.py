@@ -52,7 +52,7 @@ OBJECT_SCHEMA_VERSION = "1.20.6"
 
 class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     logger = logger
-    name = "istio"
+    _name = "istio"
 
     def __init__(self):
         self.context = None

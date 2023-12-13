@@ -50,7 +50,7 @@ OBJECT_SCHEMA_VERSION = "1.20.6"
 class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     logger = logger
 
-    name = "kops"
+    _name = "kops"
 
     def __init__(self):
         self.context = None
