@@ -1,0 +1,190 @@
+{
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+        "annotations": {
+            "deployment.kubernetes.io/revision": "319"
+        },
+        "creationTimestamp": "2021-07-05T17:03:01Z",
+        "generation": 323,
+        "labels": {
+            "remove_replicas": "true"
+        },
+        "name": "user-api",
+        "namespace": "general",
+        "resourceVersion": "644631573",
+        "uid": "2bd395e5-17eb-467a-a87b-d1a4841a00fd"
+    },
+    "spec": {
+        "progressDeadlineSeconds": 600,
+        "replicas": 1,
+        "revisionHistoryLimit": 10,
+        "selector": {
+            "matchLabels": {
+                "application": "user-api"
+            }
+        },
+        "strategy": {
+            "rollingUpdate": {
+                "maxSurge": 1,
+                "maxUnavailable": 0
+            },
+            "type": "RollingUpdate"
+        },
+        "template": {
+            "metadata": {
+                "annotations": {
+                    "backend_app": "backend_app",
+                    "ci_commit_sha": "c77cebe38ae82888cb362adf8c6b0b4b531dd71a",
+                    "configmap_sha": "06e1dbf2ffd407fe77855796b6e8810b23253da0fca2bdd4ddf086607cbb3383",
+                    "iam.amazonaws.com/role": "k8s-s3",
+                    "java_app": "promtail",
+                    "kubectl.kubernetes.io/restartedAt": "2022-04-11T20:16:57+04:00",
+                    "prometheus.io/path": "/actuator/prometheus",
+                    "prometheus.io/port": "8082",
+                    "prometheus.io/scrape": "true",
+                    "prometheus.istio.io/merge-metrics": "false",
+                    "vault.hashicorp.com/agent-init-first": "true",
+                    "vault.hashicorp.com/agent-inject": "true",
+                    "vault.hashicorp.com/agent-inject-secret-user-api": "kv/user-api",
+                    "vault.hashicorp.com/agent-inject-status": "update",
+                    "vault.hashicorp.com/agent-inject-template-user-api": "{{- with secret \"kv/user-api\" -}}\n  export USER_DB_URL=\"{{ .Data.data.USER_DB_URL }}\"\n  export USER_DB_USER=\"{{ .Data.data.USER_DB_USER }}\"\n  export USER_DB_PASSWORD=\"{{ .Data.data.USER_DB_PASSWORD }}\"\n  export ACTIVEMQ_BROKER_URL=\"{{ .Data.data.ACTIVEMQ_BROKER_URL }}\"\n  export ACTIVEMQ_BROKER_USER=\"{{ .Data.data.ACTIVEMQ_BROKER_USER }}\"\n  export ACTIVEMQ_BROKER_PASSWORD=\"{{ .Data.data.ACTIVEMQ_BROKER_PASSWORD }}\"\n  export FRONT_OAUTH_CLIENT_SECRET=\"{{ .Data.data.FRONT_OAUTH_CLIENT_SECRET }}\"\n  export KEYCLOAK_MOBILE_CLIENT_SECRET=\"{{ .Data.data.KEYCLOAK_MOBILE_CLIENT_SECRET }}\"\n  export KEYCLOAK_WEB_CLIENT_SECRET=\"{{ .Data.data.KEYCLOAK_WEB_CLIENT_SECRET }}\"\n  export LOG_SLACK_WEBHOOK=\"{{ .Data.data.LOG_SLACK_WEBHOOK }}\"\n  export PHONE_SIGNATURE_SECRET_RSA_1=\"{{ .Data.data.PHONE_SIGNATURE_SECRET_RSA_1 }}\"\n  export PHONE_SIGNATURE_SECRET_RSA_2=\"{{ .Data.data.PHONE_SIGNATURE_SECRET_RSA_2 }}\"\n  export PHONE_SIGNATURE_SECRET_RSA_3=\"{{ .Data.data.PHONE_SIGNATURE_SECRET_RSA_3 }}\"\n{{- end -}}\n",
+                    "vault.hashicorp.com/role": "payperless-dev"
+                },
+                "creationTimestamp": null,
+                "labels": {
+                    "application": "user-api",
+                    "env": "dev",
+                    "namespace": "general"
+                },
+                "name": "user-api"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "command": [
+                            "/bin/bash",
+                            "-c",
+                            "source /vault/secrets/user-api \u0026\u0026 java $JAVA_OPTS -jar user-api.jar"
+                        ],
+                        "env": [
+                            {
+                                "name": "JAVA_OPTS",
+                                "value": "-XX:MaxRAMPercentage=80 -Djdk.tls.client.protocols=TLSv1,TLSv1.1,TLSv1.2"
+                            }
+                        ],
+                        "envFrom": [
+                            {
+                                "configMapRef": {
+                                    "name": "user-api"
+                                }
+                            }
+                        ],
+                        "image": "registry.europayhub.com/covault-wallet/cb_user/dev:user-api-1.0-SNAPSHOT",
+                        "imagePullPolicy": "Always",
+                        "livenessProbe": {
+                            "failureThreshold": 2,
+                            "httpGet": {
+                                "path": "/actuator/health/liveness",
+                                "port": 8082,
+                                "scheme": "HTTP"
+                            },
+                            "periodSeconds": 5,
+                            "successThreshold": 1,
+                            "timeoutSeconds": 1
+                        },
+                        "name": "user-api",
+                        "ports": [
+                            {
+                                "containerPort": 8082,
+                                "protocol": "TCP"
+                            }
+                        ],
+                        "resources": {
+                            "limits": {
+                                "cpu": "3",
+                                "memory": "2Gi"
+                            },
+                            "requests": {
+                                "cpu": "500m",
+                                "memory": "500Mi"
+                            }
+                        },
+                        "startupProbe": {
+                            "failureThreshold": 30,
+                            "httpGet": {
+                                "path": "/actuator/health/liveness",
+                                "port": 8082,
+                                "scheme": "HTTP"
+                            },
+                            "periodSeconds": 10,
+                            "successThreshold": 1,
+                            "timeoutSeconds": 1
+                        },
+                        "terminationMessagePath": "/dev/termination-log",
+                        "terminationMessagePolicy": "File"
+                    }
+                ],
+                "dnsPolicy": "ClusterFirst",
+                "imagePullSecrets": [
+                    {
+                        "name": "gitlab-docker"
+                    }
+                ],
+                "restartPolicy": "Always",
+                "schedulerName": "default-scheduler",
+                "securityContext": {},
+                "serviceAccount": "payperless-dev",
+                "serviceAccountName": "payperless-dev",
+                "terminationGracePeriodSeconds": 15,
+                "topologySpreadConstraints": [
+                    {
+                        "labelSelector": {
+                            "matchLabels": {
+                                "application": "user-api"
+                            }
+                        },
+                        "maxSkew": 1,
+                        "topologyKey": "topology.kubernetes.io/zone",
+                        "whenUnsatisfiable": "ScheduleAnyway"
+                    },
+                    {
+                        "labelSelector": {
+                            "matchLabels": {
+                                "application": "user-api"
+                            }
+                        },
+                        "maxSkew": 1,
+                        "topologyKey": "kubernetes.io/hostname",
+                        "whenUnsatisfiable": "ScheduleAnyway"
+                    }
+                ]
+            }
+        }
+    },
+    "status": {
+        "availableReplicas": 1,
+        "conditions": [
+            {
+                "lastTransitionTime": "2022-11-08T10:09:40Z",
+                "lastUpdateTime": "2023-04-25T10:10:19Z",
+                "message": "ReplicaSet \"user-api-6cb5d95689\" has successfully progressed.",
+                "reason": "NewReplicaSetAvailable",
+                "status": "True",
+                "type": "Progressing"
+            },
+            {
+                "lastTransitionTime": "2023-07-25T21:59:06Z",
+                "lastUpdateTime": "2023-07-25T21:59:06Z",
+                "message": "Deployment has minimum availability.",
+                "reason": "MinimumReplicasAvailable",
+                "status": "True",
+                "type": "Available"
+            }
+        ],
+        "observedGeneration": 323,
+        "readyReplicas": 1,
+        "replicas": 1,
+        "updatedReplicas": 1
+    }
+}

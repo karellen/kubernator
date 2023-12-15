@@ -28,6 +28,7 @@ import urllib.parse
 from collections.abc import Callable
 from collections.abc import Iterable, MutableSet, Reversible
 from enum import Enum
+from functools import cache
 from hashlib import sha256
 from io import StringIO as io_StringIO
 from pathlib import Path
@@ -44,6 +45,7 @@ from jinja2 import (Environment,
                     make_logging_undefined,
                     Template as JinjaTemplate,
                     pass_context)
+from jsonpath_ng.ext import parse as jp_parse
 from jsonschema import validators
 
 _CACHE_HEADER_TRANSLATION = {"etag": "if-none-match",
@@ -64,6 +66,45 @@ def re_filter(name: str, patterns: Iterable[re.Pattern]):
 
 def to_patterns(*patterns):
     return [re.compile(fnmatch.translate(p)) for p in patterns]
+
+
+class JPath:
+    def __init__(self, pattern):
+        self.pattern = jp_parse(pattern)
+
+    def find(self, val):
+        return self.pattern.find(val)
+
+    def all(self, val):
+        return list(map(lambda x: x.value, self.find(val)))
+
+    def first(self, val):
+        """Returns the first element or None if it doesn't exist"""
+        try:
+            return next(map(lambda x: x.value, self.find(val)))
+        except StopIteration:
+            return None
+
+    def only(self, val):
+        """Returns the first and only element.
+        Raises ValueError if more than one value found
+        Raises KeyError if no value found
+        """
+        m = map(lambda x: x.value, self.find(val))
+        try:
+            v = next(m)
+        except StopIteration:
+            raise KeyError("no value found")
+        try:
+            next(m)
+            raise ValueError("more than one value returned")
+        except StopIteration:
+            return v
+
+
+@cache
+def jp(pattern) -> JPath:
+    return JPath(pattern)
 
 
 def scan_dir(logger, path: Path, path_filter: Callable[[os.DirEntry], bool], excludes, includes):
