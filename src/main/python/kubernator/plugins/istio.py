@@ -77,7 +77,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             istio_tar.extractall(self.istioctl_dir.name)
 
             os.chmod(istioctl_file, 0o500)
-            prepend_os_path(str(self.istioctl_dir))
+            prepend_os_path(self.istioctl_dir.name)
         else:
             # Use current version
             istioctl_file = which("istioctl")

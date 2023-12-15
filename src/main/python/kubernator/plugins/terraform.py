@@ -71,7 +71,7 @@ class TerraformPlugin(KubernatorPlugin):
             tf_zip.extractall(self.tf_dir.name)
 
             os.chmod(tf_file, 0o500)
-            prepend_os_path(str(self.tf_dir))
+            prepend_os_path(self.tf_dir.name)
         else:
             # Use current version
             tf_file = which("terraform")

@@ -101,7 +101,7 @@ class AwsCliPlugin(KubernatorPlugin):
                 aws_file.chmod(0o500)
 
             self.aws_dir = awscli_cache_dir
-            prepend_os_path(str(self.aws_dir))
+            prepend_os_path(self.aws_dir)
 
         self.aws_file = str(aws_file)
 

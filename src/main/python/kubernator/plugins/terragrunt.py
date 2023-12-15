@@ -66,7 +66,7 @@ class TerragruntPlugin(KubernatorPlugin):
             tg_file = Path(self.tg_dir.name) / "terragrunt"
             copy(tg_file_cache, tg_file)
             os.chmod(tg_file, 0o500)
-            prepend_os_path(str(self.tg_dir))
+            prepend_os_path(self.tg_dir.name)
         else:
             # Use current version
             tg_file = which("terragrunt")

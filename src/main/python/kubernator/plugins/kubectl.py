@@ -73,7 +73,7 @@ class KubectlPlugin(KubernatorPlugin):
             kubectl_file = str(Path(self.kubectl_dir.name) / "kubectl")
             copy(kubectl_file_dl, kubectl_file)
             os.chmod(kubectl_file, 0o500)
-            prepend_os_path(str(self.kubectl_dir))
+            prepend_os_path(self.kubectl_dir.name)
         else:
             # Use current version
             kubectl_file = which("kubectl")

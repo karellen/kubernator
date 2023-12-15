@@ -620,6 +620,7 @@ def clone_url_str(url):
 
 
 def prepend_os_path(path):
+    path = str(path)
     paths = os.environ["PATH"].split(os.pathsep)
     if path not in paths:
         paths.insert(0, path)

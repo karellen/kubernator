@@ -132,7 +132,7 @@ class HelmPlugin(KubernatorPlugin):
             copy(Path(self.helm_dir.name)/f"{get_golang_os()}-{get_golang_machine()}"/"helm", helm_file)
 
             os.chmod(helm_file, 0o500)
-            prepend_os_path(str(self.helm_dir))
+            prepend_os_path(self.helm_dir.name)
         else:
             # Use current version
             helm_file = which("helm")
