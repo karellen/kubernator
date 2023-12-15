@@ -27,7 +27,7 @@ use_plugin("python.vendorize")
 use_plugin("filter_resources")
 
 name = "kubernator"
-version = "1.0.1"
+version = "1.0.2.dev"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
@@ -132,7 +132,14 @@ def publish(project):
     image = f"ghcr.io/karellen/kubernator"
     versioned_image = f"{image}:{project.dist_version}"
     project.set_property("docker_image", image)
-    check_call(["docker", "build", "-t", versioned_image, "-t", f"{image}:latest", "."])
+    labels = ["-t", versioned_image]
+
+    # Do not tag with latest if it's a development build
+    if project.version == project.dist_version:
+        labels += ["-t", f"{image}:latest"]
+
+    check_call(["docker", "build"] + labels + ["."])
+
 
 @task
 def upload(project):

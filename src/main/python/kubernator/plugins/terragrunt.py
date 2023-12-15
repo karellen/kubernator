@@ -18,9 +18,10 @@
 
 import json
 import logging
+import tempfile
 import os
 from pathlib import Path
-from shutil import which
+from shutil import which, copy
 
 from kubernator.api import (KubernatorPlugin, Globs, StripNL,
                             scan_dir,
@@ -59,7 +60,11 @@ class TerragruntPlugin(KubernatorPlugin):
             # Download and use specific version
             tg_url = (f"https://github.com/gruntwork-io/terragrunt/releases/download/v{version}/"
                       f"terragrunt_{get_golang_os()}_{get_golang_machine()}")
-            tg_file, _ = context.app.download_remote_file(logger, tg_url, "bin")
+            tg_file_cache, _ = context.app.download_remote_file(logger, tg_url, "bin")
+
+            self.tg_dir = tempfile.TemporaryDirectory()
+            tg_file = Path(self.tg_dir.name) / "terragrunt"
+            copy(tg_file_cache, tg_file)
             os.chmod(tg_file, 0o500)
             prepend_os_path(str(self.tg_dir))
         else:

@@ -30,7 +30,7 @@ from typing import Optional, Union
 
 import kubernator
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, PropertyDict, config_as_dict, config_parent,
-                            download_remote_file, load_remote_file, Repository, StripNL)
+                            download_remote_file, load_remote_file, Repository, StripNL, jp)
 from kubernator.proc import run, run_capturing_out
 
 TRACE = 5
@@ -121,15 +121,6 @@ def init_logging(verbose, output_format, output_file):
 
     handler.setFormatter(formatter)
     logger.setLevel(logging._nameToLevel[verbose])
-
-
-# class RepositoryPath:
-#    def __init__(self, path: Path, repository: Repository = None):
-#        self.path = path.absolute()
-#        self.repository = repository
-#
-#    def __str__(self):
-#        return self.repository.url_str if self.repository else ""
 
 
 class App(KubernatorPlugin):
@@ -325,6 +316,7 @@ class App(KubernatorPlugin):
                                    download_remote_file=download_remote_file,
                                    load_remote_file=load_remote_file,
                                    register_cleanup=self.register_cleanup,
+                                   jp=jp,
                                    run=self._run,
                                    run_capturing_out=self._run_capturing_out,
                                    repository=self.repository,

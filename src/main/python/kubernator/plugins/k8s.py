@@ -29,9 +29,6 @@ from typing import Iterable, Callable, Sequence
 
 import jsonpatch
 import yaml
-from kubernetes import client
-from kubernetes.client.rest import ApiException
-from kubernetes.config import load_incluster_config, load_kube_config, ConfigException
 
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, load_file, FileType, load_remote_file)
 from kubernator.plugins.k8s_api import (K8SResourcePluginMixin,
@@ -113,6 +110,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         self.setup_client()
 
     def setup_client(self):
+        from kubernetes import client
+
         context = self.context
 
         context.k8s.client = self._setup_k8s_client()
@@ -121,6 +120,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             git_version = version.git_version.split("-")[0]
         else:
             git_version = version.git_version
+
+        context.k8s.server_version = git_version
 
         logger.info("Found Kubernetes %s on %s", version.git_version, context.k8s.client.configuration.host)
 
@@ -285,6 +286,9 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                         create_func: Callable[[], None],
                         delete_func: Callable[[K8SPropagationPolicy], None],
                         status_msg):
+        from kubernetes import client
+        from kubernetes.client.rest import ApiException
+
         rdef = resource.rdef
         rdef.populate_api(client, self.context.k8s.client)
 
@@ -373,7 +377,10 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             result.append(op)
         return result
 
-    def _setup_k8s_client(self) -> client.ApiClient:
+    def _setup_k8s_client(self):
+        from kubernetes import client
+        from kubernetes.config import load_incluster_config, load_kube_config, ConfigException
+
         try:
             logger.debug("Trying K8S in-cluster configuration")
             load_incluster_config()

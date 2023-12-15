@@ -25,10 +25,6 @@ from pathlib import Path
 from shutil import which
 
 import yaml
-from jsonpath_ng.ext import parse as jp_parse
-from kubernetes import client
-from kubernetes.client.rest import ApiException
-
 from kubernator.api import (KubernatorPlugin, scan_dir,
                             TemplateEngine,
                             load_remote_file,
@@ -37,7 +33,7 @@ from kubernator.api import (KubernatorPlugin, scan_dir,
                             Globs,
                             get_golang_os,
                             get_golang_machine,
-                            prepend_os_path)
+                            prepend_os_path, jp)
 from kubernator.plugins.k8s_api import K8SResourcePluginMixin
 
 logger = logging.getLogger("kubernator.istio")
@@ -45,9 +41,7 @@ proc_logger = logger.getChild("proc")
 stdout_logger = StripNL(proc_logger.info)
 stderr_logger = StripNL(proc_logger.warning)
 
-MESH_PILOT_JP = jp_parse('$.meshVersion[?Component="pilot"].Info.version')
-
-OBJECT_SCHEMA_VERSION = "1.20.6"
+MESH_PILOT_JP = jp('$.meshVersion[?Component="pilot"].Info.version')
 
 
 class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
@@ -108,7 +102,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         version_out_js = json.loads(version_out)
         version = version_out_js["clientVersion"]["version"]
         logger.info("Using istioctl %r version %r with stanza %r",
-                    self.context.istio.istioctl_file, version, self.istioctl_stanza())
+                    self.context.istio.istioctl_file, version, context.istio.istioctl_stanza())
 
         logger.info("Found Istio client version %s", version)
 
@@ -151,7 +145,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         # This plugin only deals with Istio Operator, so only load that stuff
         self.resource_definitions_schema = load_remote_file(logger,
                                                             f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
-                                                            f"v{OBJECT_SCHEMA_VERSION}/api/openapi-spec/swagger.json",
+                                                            f"{self.context.k8s.server_version}/api/openapi-spec/swagger.json",
                                                             FileType.JSON)
         self._populate_resource_definitions()
         self.add_remote_crds(f"{url_prefix}/crd-operator.yaml", FileType.YAML)
@@ -175,7 +169,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         for f in scan_dir(logger, cwd, lambda d: d.is_file(), istio.excludes, istio.includes):
             p = cwd / f.name
             display_p = context.app.display_path(p)
-            logger.debug("Adding Istio Operator from %s", display_p)
+            logger.info("Adding Istio Operator from %s", display_p)
 
             with open(p, "rt") as file:
                 template = self.template_engine.from_string(file.read())
@@ -189,13 +183,14 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             logger.info("Skipping Istio as no Operator was processed")
         else:
             with tempfile.NamedTemporaryFile(mode="wt", delete=False) as operators_file:
+                logger.info("Saving Istio Operators to %s", operators_file.name)
                 yaml.safe_dump_all((r.manifest for r in self.resources.values()), operators_file)
 
             if context.app.args.command == "apply":
                 logger.info("Running Istio precheck")
-                context.app.run(self.istio_stanza + ["x", "precheck"],
+                context.app.run(context.istio.istioctl_stanza() + ["x", "precheck"],
                                 stdout_logger, stderr_logger).wait()
-                context.app.run(self.istio_stanza + ["validate", "-f", operators_file.name],
+                context.app.run(context.istio.istioctl_stanza() + ["validate", "-f", operators_file.name],
                                 stdout_logger, stderr_logger).wait()
 
                 self._operator_init(operators_file, True)
@@ -204,6 +199,9 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                     self._operator_init(operators_file, False)
 
     def _operator_init(self, operators_file, dry_run):
+        from kubernetes import client
+        from kubernetes.client.rest import ApiException
+
         context = self.context
 
         status_details = " (dry run)" if dry_run else ""
@@ -231,7 +229,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 raise
 
         logger.info("Running Istio operator init%s", status_details)
-        istio_operator_init = self.istio_stanza + ["operator", "init", "-f", operators_file.name]
+        istio_operator_init = context.istio.istioctl_stanza() + ["operator", "init", "-f", operators_file.name]
         context.app.run(istio_operator_init + (["--dry-run"] if dry_run else []),
                         stdout_logger,
                         stderr_logger).wait()
