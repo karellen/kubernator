@@ -23,7 +23,7 @@ import re
 import tempfile
 import zipfile
 from pathlib import Path
-from shutil import which, copy
+from shutil import which
 
 from kubernator.api import (KubernatorPlugin, Globs, StripNL,
                             scan_dir,
@@ -69,8 +69,6 @@ class TerraformPlugin(KubernatorPlugin):
             tf_file = str(Path(self.tf_dir.name) / "terraform")
             tf_zip = zipfile.ZipFile(tf_file_dl)
             tf_zip.extractall(self.tf_dir.name)
-
-            copy(Path(self.tf_dir.name) / "terraform", tf_file)
 
             os.chmod(tf_file, 0o500)
             prepend_os_path(str(self.tf_dir))
