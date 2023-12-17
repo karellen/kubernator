@@ -145,7 +145,8 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         # This plugin only deals with Istio Operator, so only load that stuff
         self.resource_definitions_schema = load_remote_file(logger,
                                                             f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
-                                                            f"{self.context.k8s.server_version}/api/openapi-spec/swagger.json",
+                                                            f"{self.context.k8s.server_git_version}"
+                                                            f"/api/openapi-spec/swagger.json",
                                                             FileType.JSON)
         self._populate_resource_definitions()
         self.add_remote_crds(f"{url_prefix}/crd-operator.yaml", FileType.YAML)

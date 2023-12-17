@@ -26,11 +26,13 @@ import urllib.parse
 from collections import deque
 from collections.abc import MutableMapping, Callable
 from pathlib import Path
+from shutil import rmtree
 from typing import Optional, Union
 
 import kubernator
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, PropertyDict, config_as_dict, config_parent,
-                            download_remote_file, load_remote_file, Repository, StripNL, jp)
+                            download_remote_file, load_remote_file, Repository, StripNL, jp, get_app_cache_dir,
+                            install_python_k8s_client)
 from kubernator.proc import run, run_capturing_out
 
 TRACE = 5
@@ -55,10 +57,16 @@ logger = logging.getLogger("kubernator")
 
 
 def define_arg_parse():
-    parser = argparse.ArgumentParser(description="Kubernetes Provisioning Tool",
+    parser = argparse.ArgumentParser(prog="kubernator",
+                                     description="Kubernetes Provisioning Tool",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--version", action="version", version=kubernator.__version__,
-                        help="print version and exit")
+    g = parser.add_mutually_exclusive_group()
+    g.add_argument("--version", action="version", version=kubernator.__version__,
+                   help="print version and exit")
+    g.add_argument("--clear-cache", action="store_true",
+                   help="clear cache and exit")
+    g.add_argument("--pre-cache-k8s-client", action="extend", nargs="+", type=int,
+                   help="download specified K8S client library minor(!) version(s) and exit")
     parser.add_argument("--log-format", choices=["human", "json"], default="human",
                         help="whether to log for human or machine consumption")
     parser.add_argument("--log-file", type=argparse.FileType("w"), default=None,
@@ -440,11 +448,36 @@ class App(KubernatorPlugin):
         return "Kubernator"
 
 
+def clear_cache():
+    cache_dir = get_app_cache_dir()
+    logger.info("Clearing application cache at %s", cache_dir)
+    if cache_dir.exists():
+        rmtree(cache_dir)
+
+
+def pre_cache_k8s_clients(*versions):
+    proc_logger = logger.getChild("proc")
+    stdout_logger = StripNL(proc_logger.info)
+    stderr_logger = StripNL(proc_logger.warning)
+
+    for v in versions:
+        logger.info("Caching K8S client library ~=v%s.0...", v)
+        install_python_k8s_client(run, v, stdout_logger, stderr_logger)
+
+
 def main():
     args = define_arg_parse().parse_args()
     init_logging(args.verbose, args.log_format, args.log_file)
 
     try:
+        if args.clear_cache:
+            clear_cache()
+            return
+
+        if args.pre_cache_k8s_client:
+            pre_cache_k8s_clients(*args.pre_cache_k8s_client)
+            return
+
         with App(args) as app:
             app.run()
     except SystemExit as e:
