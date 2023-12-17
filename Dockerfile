@@ -9,4 +9,5 @@ RUN pip install --no-input --no-cache-dir /tmp/*.whl && \
     rm -rf /tmp/*
 
 WORKDIR /root
+RUN kubernator --pre-cache-k8s-client $(seq 19 28)
 ENTRYPOINT ["/usr/local/bin/kubernator"]

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 #   Copyright 2020 Express Systems USA, Inc
-#   Copyright 2021 Karellen, Inc.
+#   Copyright 2023 Karellen, Inc.
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -16,21 +16,9 @@
 #   limitations under the License.
 #
 
-__version__ = "${dist_version}"
+from test_support import IntegrationTestSupport
 
 
-def _main():
-    from kubernator import app
-    return app.main() or 0
-
-
-def main():
-    from gevent.monkey import patch_all
-    patch_all()
-
-    import sys
-    sys.exit(_main())
-
-
-if __name__ == "__main__":
-    main()
+class VersionSmokeTest(IntegrationTestSupport):
+    def test_version(self):
+        self.smoke_test_module("kubernator", "--version")

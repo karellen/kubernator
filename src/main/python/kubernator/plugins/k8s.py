@@ -24,19 +24,30 @@ import sys
 import types
 from collections.abc import Mapping
 from functools import partial
+from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Iterable, Callable, Sequence
 
 import jsonpatch
 import yaml
 
-from kubernator.api import (KubernatorPlugin, Globs, scan_dir, load_file, FileType, load_remote_file)
+from kubernator.api import (KubernatorPlugin,
+                            Globs,
+                            scan_dir,
+                            load_file,
+                            FileType,
+                            load_remote_file,
+                            StripNL,
+                            install_python_k8s_client)
 from kubernator.plugins.k8s_api import (K8SResourcePluginMixin,
                                         K8SResource,
                                         K8SResourcePatchType,
                                         K8SPropagationPolicy)
 
 logger = logging.getLogger("kubernator.k8s")
+proc_logger = logger.getChild("proc")
+stdout_logger = StripNL(proc_logger.info)
+stderr_logger = StripNL(proc_logger.warning)
 
 
 def final_resource_validator(resources: Sequence[K8SResource],
@@ -61,6 +72,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     def __init__(self):
         super().__init__()
         self.context = None
+
+        self.embedded_pkg_version = self._get_kubernetes_client_version()
 
         self._transformers = []
         self._validators = []
@@ -109,30 +122,63 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     def _kubeconfig_changed(self):
         self.setup_client()
 
+    def _get_kubernetes_client_version(self):
+        return pkg_version("kubernetes").split(".")
+
     def setup_client(self):
+        k8s = self.context.k8s
+        if "server_version" not in k8s:
+            self._setup_client()
+
+        server_minor = k8s.server_version[1]
+        pkg_major = self.embedded_pkg_version[0]
+        if server_minor != pkg_major:
+            logger.info("Bundled Kubernetes client version %s doesn't match server version %s",
+                        ".".join(self.embedded_pkg_version), ".".join(k8s.server_version))
+            pkg_dir = install_python_k8s_client(self.context.app.run, server_minor, stdout_logger, stderr_logger)
+
+            modules_to_delete = []
+            for k, v in sys.modules.items():
+                if k == "kubernetes" or k.startswith("kubernetes."):
+                    modules_to_delete.append(k)
+            for k in modules_to_delete:
+                del sys.modules[k]
+
+            logger.info("Adding sys.path reference to %s", pkg_dir)
+            sys.path.insert(0, str(pkg_dir))
+            self.embedded_pkg_version = self._get_kubernetes_client_version()
+            logger.info("Switching to Kubernetes client version %s", ".".join(self.embedded_pkg_version))
+            self._setup_client()
+        else:
+            logger.info("Bundled Kubernetes client version %s matches server version %s",
+                        ".".join(self.embedded_pkg_version), ".".join(k8s.server_version))
+
+        k8s_def = load_remote_file(logger, f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
+                                           f"{k8s.server_git_version}/api/openapi-spec/swagger.json",
+                                   FileType.JSON)
+        self.resource_definitions_schema = k8s_def
+
+        self._populate_resource_definitions()
+
+    def _setup_client(self):
         from kubernetes import client
 
         context = self.context
+        k8s = context.k8s
 
-        context.k8s.client = self._setup_k8s_client()
-        version = client.VersionApi(context.k8s.client).get_code()
+        k8s.client = self._setup_k8s_client()
+        version = client.VersionApi(k8s.client).get_code()
         if "-eks-" in version.git_version:
             git_version = version.git_version.split("-")[0]
         else:
             git_version = version.git_version
 
-        context.k8s.server_version = git_version
+        k8s.server_version = git_version[1:].split(".")
+        k8s.server_git_version = git_version
 
-        logger.info("Found Kubernetes %s on %s", version.git_version, context.k8s.client.configuration.host)
+        logger.info("Found Kubernetes %s on %s", k8s.server_git_version, k8s.client.configuration.host)
 
-        logger.debug("Reading Kubernetes OpenAPI spec for version %s", git_version)
-
-        k8s_def = load_remote_file(logger, f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
-                                           f"{git_version}/api/openapi-spec/swagger.json",
-                                   FileType.JSON)
-        self.resource_definitions_schema = k8s_def
-
-        self._populate_resource_definitions()
+        logger.debug("Reading Kubernetes OpenAPI spec for %s", k8s.server_git_version)
 
     def handle_before_dir(self, cwd: Path):
         context = self.context
