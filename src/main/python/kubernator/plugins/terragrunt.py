@@ -49,7 +49,7 @@ class TerragruntPlugin(KubernatorPlugin):
     def set_context(self, context):
         self.context = context
 
-    def tg_stanza(self):
+    def stanza(self):
         return [self.tg_file]
 
     def register(self, version=None):
@@ -81,7 +81,7 @@ class TerragruntPlugin(KubernatorPlugin):
         version = version_out.split(" ")[-1][1:].strip()
         context.globals.terragrunt = dict(version=version,
                                           tg_file=self.tg_file,
-                                          tg_stanza=self.tg_stanza,
+                                          stanza=self.stanza,
                                           )
 
         logger.info("Found Terragrunt version %s at %s", version, self.tg_file)
@@ -113,10 +113,10 @@ class TerragruntPlugin(KubernatorPlugin):
         if not tg_detected:
             return
 
-        context.app.run(self.tg_stanza() + ["run-all", "init", "-reconfigure", "-input=false", "-upgrade=false"],
+        context.app.run(self.stanza() + ["run-all", "init", "-reconfigure", "-input=false", "-upgrade=false"],
                         stdout_logger, stderr_logger, cwd=cwd).wait()
 
-        output_json = context.app.run_capturing_out(self.tg_stanza() + ["run-all", "output", "-json"],
+        output_json = context.app.run_capturing_out(self.stanza() + ["run-all", "output", "-json"],
                                                     stderr_logger, cwd=cwd)
 
         json_decoder = json.JSONDecoder()

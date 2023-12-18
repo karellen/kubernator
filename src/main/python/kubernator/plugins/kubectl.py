@@ -49,7 +49,7 @@ class KubectlPlugin(KubernatorPlugin):
     def set_context(self, context):
         self.context = context
 
-    def kubectl_stanza(self):
+    def stanza(self):
         context = self.context.kubectl
         return [context.kubectl_file, f"--kubeconfig={context.kubeconfig}"]
 
@@ -85,14 +85,14 @@ class KubectlPlugin(KubernatorPlugin):
         context.globals.kubectl = dict(version=version,
                                        kubeconfig=kubeconfig,
                                        kubectl_file=kubectl_file,
-                                       kubectl_stanza=self.kubectl_stanza,
+                                       stanza=self.stanza,
                                        test=self.test_kubectl
                                        )
 
         context.globals.kubectl.version = context.kubectl.test()
 
     def test_kubectl(self):
-        version_out: str = self.context.app.run_capturing_out(self.kubectl_stanza() +
+        version_out: str = self.context.app.run_capturing_out(self.stanza() +
                                                               ["version", "--client=true", "-o", "json"],
                                                               stderr_logger)
 
@@ -100,7 +100,7 @@ class KubectlPlugin(KubernatorPlugin):
         kubectl_version = version_out_js["clientVersion"]["gitVersion"][1:]
 
         logger.info("Using kubectl %r version %r with stanza %r",
-                    self.context.kubectl.kubectl_file, kubectl_version, self.kubectl_stanza())
+                    self.context.kubectl.kubectl_file, kubectl_version, self.stanza())
 
         return kubectl_version
 

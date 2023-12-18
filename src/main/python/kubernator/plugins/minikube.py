@@ -18,11 +18,16 @@
 
 import logging
 import os
+import tempfile
+from pathlib import Path
 
 from kubernator.api import (KubernatorPlugin,
                             StripNL,
                             get_golang_os,
-                            get_golang_machine
+                            get_golang_machine,
+                            prepend_os_path,
+                            get_cache_dir,
+                            CalledProcessError
                             )
 
 logger = logging.getLogger("kubernator.minikube")
@@ -38,6 +43,7 @@ class MinikubePlugin(KubernatorPlugin):
 
     def __init__(self):
         self.context = None
+        self.minikube_dir = None
         self.minikube_home_dir = None
         self.kubeconfig_dir = None
 
@@ -64,38 +70,116 @@ class MinikubePlugin(KubernatorPlugin):
                                                          map(lambda line: line.split()[1][11:].split("."),
                                                              versions.splitlines(False))))))[-1])))
 
-    def cmd(self, ):
-        pass
+    def cmd(self, *extra_args):
+        stanza, env = self._stanza(list(extra_args))
+        return self.context.app.run(stanza, stdout_logger, stderr_logger, env=env).wait()
 
-    def register(self, minikube_version=None, k8s_version=None):
+    def cmd_out(self, *extra_args):
+        stanza, env = self._stanza(list(extra_args))
+        return self.context.app.run_capturing_out(stanza, stderr_logger, env=env)
+
+    def _stanza(self, extra_args):
+        context = self.context
+        minikube = context.minikube
+        stanza = [context.minikube.minikube_file, "-p", f"minikube-{minikube.profile}"] + extra_args
+        env = dict(os.environ)
+        env["MINIKUBE_HOME"] = str(self.minikube_home_dir)
+        env["KUBECONFIG"] = str(minikube.kubeconfig)
+        return stanza, env
+
+    def register(self, minikube_version=None, profile="default", k8s_version=None, keep_running=False,
+                 nodes=1, driver="docker", cpus="no-limit", extra_args=None):
         context = self.context
 
-        context.app.register_plugin("kubectl")
+        context.app.register_plugin("kubeconfig")
+
+        if not k8s_version:
+            msg = "No Kubernetes version is specified for Minikube"
+            logger.critical(msg)
+            raise RuntimeError(msg)
 
         if not minikube_version:
             minikube_version = self.get_latest_minikube_version()
             logger.info("No minikube version is specified, latest is %s", minikube_version)
 
-        minikube_file = context.app.download_remote_file(logger,
-                                                         f"https://github.com/kubernetes/minikube/releases/download/"
-                                                         f"v{minikube_version}/"
-                                                         f"minikube-{get_golang_os()}-{get_golang_machine()}", "bin")
-        os.chmod(minikube_file, 0o500)
+        minikube_dl_file, _ = context.app.download_remote_file(logger,
+                                                               f"https://github.com/kubernetes/minikube/releases"
+                                                               f"/download/v{minikube_version}/"
+                                                               f"minikube-{get_golang_os()}-{get_golang_machine()}",
+                                                               "bin")
+
+        os.chmod(minikube_dl_file, 0o500)
+        self.minikube_dir = tempfile.TemporaryDirectory()
+        minikube_file = Path(self.minikube_dir.name) / "minikube"
+        minikube_file.symlink_to(minikube_dl_file)
+        prepend_os_path(self.minikube_dir.name)
         version_out: str = self.context.app.run_capturing_out([minikube_file, "version", "--short"],
                                                               stderr_logger)
         version = version_out[1:]
-        logger.info("Found minikube %s in %r", version, minikube_file)
+        logger.info("Found minikube %s in %s", version, minikube_file)
+
+        profile_dir = get_cache_dir("minikube", profile)
+        self.minikube_home_dir = profile_dir / "home"
+        self.minikube_home_dir.mkdir(parents=True, exist_ok=True)
+        self.kubeconfig_dir = profile_dir / ".kube"
+        self.kubeconfig_dir.mkdir(parents=True, exist_ok=True)
 
         context.globals.minikube = dict(version=version,
-                                        minikube_file=minikube_file,
-                                        cmd=self.cmd
+                                        minikube_file=str(minikube_file),
+                                        profile=profile,
+                                        k8s_version=k8s_version,
+                                        keep_running=keep_running,
+                                        nodes=nodes,
+                                        driver=driver,
+                                        cpus=cpus,
+                                        extra_args=extra_args or [],
+                                        kubeconfig=str(self.kubeconfig_dir / "config"),
+                                        cmd=self.cmd,
+                                        cmd_out=self.cmd_out
                                         )
+        context.kubeconfig.kubeconfig = context.minikube.kubeconfig
 
-    def handle_init(self):
-        pass
+        logger.info("Minikube Home is %s", self.minikube_home_dir)
+        logger.info("Minikube Kubeconfig is %s", context.minikube.kubeconfig)
+
+    def minikube_is_running(self):
+        try:
+            out = self.cmd_out("status", "-o", "json")
+            logger.info("Minikube profile %s is running: %s", self.context.minikube.profile, out)
+            return True
+        except CalledProcessError as e:
+            logger.info("Minikube profile %s is not running: %s", self.context.minikube.profile, e.output)
+            return False
+
+    def minikube_start(self):
+        minikube = self.context.minikube
+        if not self.minikube_is_running():
+            logger.info("Starting minikube profile %s...", minikube.profile)
+            self.cmd("start",
+                     "--driver", str(minikube.driver),
+                     "--nodes", str(minikube.nodes),
+                     "--cpus", str(minikube.cpus),
+                     "--kubernetes-version", str(minikube.k8s_version),
+                     "--wait", "apiserver")
+        else:
+            logger.warning("Minikube profile %s is already running!", minikube.profile)
+            logger.info("Updating minikube profile %s context", minikube.profile)
+            self.cmd("update-context")
+
+    def minikube_stop(self):
+        minikube = self.context.minikube
+        if self.minikube_is_running():
+            if not minikube.keep_running:
+                logger.info("Shutting down minikube profile %s...", minikube.profile)
+                self.cmd("stop", "-o", "json")
+            else:
+                logger.warning("Keeping minikube profile %s running on shutdown!", minikube.profile)
+
+    def handle_start(self):
+        self.minikube_start()
 
     def handle_shutdown(self):
-        pass
+        self.minikube_stop()
 
     def __repr__(self):
-        return "AWS CLI Plugin"
+        return "Minikube Plugin"
