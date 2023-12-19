@@ -209,7 +209,7 @@ class App(KubernatorPlugin):
         search_path = Path(kubernator.__path__[0], "plugins")
         [importlib.import_module(name)
          for finder, name, is_pkg in
-         pkgutil.iter_modules([search_path], "kubernator.plugins.")]
+         pkgutil.iter_modules([str(search_path)], "kubernator.plugins.")]
 
         for plugin in KubernatorPlugin.__subclasses__():
             if plugin._name in self._plugin_types:
