@@ -31,8 +31,11 @@ __all__ = ["unittest", "IntegrationTestSupport"]
 
 
 class IntegrationTestSupport(unittest.TestCase):
+    K8S_TEST_VERSIONS = ["1.20.15", "1.21.14", "1.22.17",
+                         "1.23.17", "1.24.17", "1.25.16",
+                         "1.26.9", "1.27.8", "1.28.4"]
 
-    def smoke_test_module(self, module, *args):
+    def run_module_test(self, module, *args):
         old_argv = list(sys.argv)
         del sys.argv[:]
         sys.argv.append("bogus")
