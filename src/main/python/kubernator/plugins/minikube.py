@@ -81,7 +81,7 @@ class MinikubePlugin(KubernatorPlugin):
     def _stanza(self, extra_args):
         context = self.context
         minikube = context.minikube
-        stanza = [context.minikube.minikube_file, "-p", f"minikube-{minikube.profile}"] + extra_args
+        stanza = [context.minikube.minikube_file, "-p", minikube.profile] + extra_args
         env = dict(os.environ)
         env["MINIKUBE_HOME"] = str(self.minikube_home_dir)
         env["KUBECONFIG"] = str(minikube.kubeconfig)
@@ -119,8 +119,8 @@ class MinikubePlugin(KubernatorPlugin):
         version = version_out[1:]
         logger.info("Found minikube %s in %s", version, minikube_file)
 
-        profile_dir = get_cache_dir("minikube", profile)
-        self.minikube_home_dir = profile_dir / "home"
+        profile_dir = get_cache_dir("minikube")
+        self.minikube_home_dir = profile_dir
         self.minikube_home_dir.mkdir(parents=True, exist_ok=True)
         self.kubeconfig_dir = profile_dir / ".kube"
         self.kubeconfig_dir.mkdir(parents=True, exist_ok=True)
