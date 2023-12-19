@@ -87,7 +87,8 @@ class MinikubePlugin(KubernatorPlugin):
         env["KUBECONFIG"] = str(minikube.kubeconfig)
         return stanza, env
 
-    def register(self, minikube_version=None, profile="default", k8s_version=None, keep_running=False,
+    def register(self, minikube_version=None, profile="default", k8s_version=None,
+                 keep_running=False, start_fresh=False,
                  nodes=1, driver="docker", cpus="no-limit", extra_args=None):
         context = self.context
 
@@ -114,7 +115,7 @@ class MinikubePlugin(KubernatorPlugin):
         minikube_file.symlink_to(minikube_dl_file)
         prepend_os_path(self.minikube_dir.name)
         version_out: str = self.context.app.run_capturing_out([minikube_file, "version", "--short"],
-                                                              stderr_logger)
+                                                              stderr_logger).strip()
         version = version_out[1:]
         logger.info("Found minikube %s in %s", version, minikube_file)
 
@@ -128,6 +129,7 @@ class MinikubePlugin(KubernatorPlugin):
                                         minikube_file=str(minikube_file),
                                         profile=profile,
                                         k8s_version=k8s_version,
+                                        start_fresh=start_fresh,
                                         keep_running=keep_running,
                                         nodes=nodes,
                                         driver=driver,
@@ -145,16 +147,18 @@ class MinikubePlugin(KubernatorPlugin):
     def minikube_is_running(self):
         try:
             out = self.cmd_out("status", "-o", "json")
-            logger.info("Minikube profile %s is running: %s", self.context.minikube.profile, out)
+            logger.info("Minikube profile %r is running: %s", self.context.minikube.profile,
+                        out.strip())
             return True
         except CalledProcessError as e:
-            logger.info("Minikube profile %s is not running: %s", self.context.minikube.profile, e.output)
+            logger.info("Minikube profile %r is not running: %s", self.context.minikube.profile,
+                        e.output.strip())
             return False
 
     def minikube_start(self):
         minikube = self.context.minikube
         if not self.minikube_is_running():
-            logger.info("Starting minikube profile %s...", minikube.profile)
+            logger.info("Starting minikube profile %r...", minikube.profile)
             self.cmd("start",
                      "--driver", str(minikube.driver),
                      "--nodes", str(minikube.nodes),
@@ -162,24 +166,36 @@ class MinikubePlugin(KubernatorPlugin):
                      "--kubernetes-version", str(minikube.k8s_version),
                      "--wait", "apiserver")
         else:
-            logger.warning("Minikube profile %s is already running!", minikube.profile)
-            logger.info("Updating minikube profile %s context", minikube.profile)
-            self.cmd("update-context")
+            logger.warning("Minikube profile %r is already running!", minikube.profile)
+
+        logger.info("Updating minikube profile %r context", minikube.profile)
+        self.cmd("update-context")
 
     def minikube_stop(self):
         minikube = self.context.minikube
         if self.minikube_is_running():
-            if not minikube.keep_running:
-                logger.info("Shutting down minikube profile %s...", minikube.profile)
-                self.cmd("stop", "-o", "json")
-            else:
-                logger.warning("Keeping minikube profile %s running on shutdown!", minikube.profile)
+            logger.info("Shutting down minikube profile %r...", minikube.profile)
+            self.cmd("stop", "-o", "json")
+
+    def minikube_delete(self):
+        minikube = self.context.minikube
+        self.minikube_stop()
+        logger.warning("Deleting minikube profile %r!", minikube.profile)
+        self.cmd("delete")
 
     def handle_start(self):
+        minikube = self.context.minikube
+        if minikube.start_fresh:
+            self.minikube_delete()
+
         self.minikube_start()
 
     def handle_shutdown(self):
-        self.minikube_stop()
+        minikube = self.context.minikube
+        if not minikube.keep_running:
+            self.minikube_stop()
+        else:
+            logger.warning("Will keep minikube profile %s running!", minikube.profile)
 
     def __repr__(self):
         return "Minikube Plugin"
