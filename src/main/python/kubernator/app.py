@@ -166,40 +166,43 @@ class App(KubernatorPlugin):
 
         self.register_plugin(self)
 
-        while True:
-            cwd = self.next()
-            if not cwd:
-                logger.debug("No paths left to traverse")
-                break
+        try:
+            while True:
+                cwd = self.next()
+                if not cwd:
+                    logger.debug("No paths left to traverse")
+                    break
 
+                context = self.context
+
+                logger.debug("Inspecting directory %s", self._display_path(cwd))
+                self._run_handlers(KubernatorPlugin.handle_before_dir, False, context, None, cwd)
+
+                if (ktor_py := (cwd / ".kubernator.py")).exists():
+                    self._run_handlers(KubernatorPlugin.handle_before_script, False, context, None, cwd)
+
+                    for h in self.context._plugins:
+                        h.set_context(context)
+
+                    self._exec_ktor(ktor_py)
+
+                    for h in self.context._plugins:
+                        h.set_context(None)
+
+                    self._run_handlers(KubernatorPlugin.handle_after_script, True, context, None, cwd)
+
+                self._run_handlers(KubernatorPlugin.handle_after_dir, True, context, None, cwd)
+
+            self.context = self._top_dir_context
             context = self.context
 
-            logger.debug("Inspecting directory %s", self._display_path(cwd))
-            self._run_handlers(KubernatorPlugin.handle_before_dir, False, context, None, cwd)
+            self._run_handlers(KubernatorPlugin.handle_apply, True, context, None)
 
-            if (ktor_py := (cwd / ".kubernator.py")).exists():
-                self._run_handlers(KubernatorPlugin.handle_before_script, False, context, None, cwd)
-
-                for h in self.context._plugins:
-                    h.set_context(context)
-
-                self._exec_ktor(ktor_py)
-
-                for h in self.context._plugins:
-                    h.set_context(None)
-
-                self._run_handlers(KubernatorPlugin.handle_after_script, True, context, None, cwd)
-
-            self._run_handlers(KubernatorPlugin.handle_after_dir, True, context, None, cwd)
-
-        self.context = self._top_dir_context
-        context = self.context
-
-        self._run_handlers(KubernatorPlugin.handle_apply, True, context, None)
-
-        self._run_handlers(KubernatorPlugin.handle_verify, True, context, None)
-
-        self._run_handlers(KubernatorPlugin.handle_shutdown, True, context, None)
+            self._run_handlers(KubernatorPlugin.handle_verify, True, context, None)
+        finally:
+            self.context = self._top_dir_context
+            context = self.context
+            self._run_handlers(KubernatorPlugin.handle_shutdown, True, context, None)
 
     def discover_plugins(self):
         importlib.invalidate_caches()

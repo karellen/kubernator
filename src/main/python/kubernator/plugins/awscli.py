@@ -54,7 +54,7 @@ class AwsCliPlugin(KubernatorPlugin):
     def set_context(self, context):
         self.context = context
 
-    def cmd(self, *args, output="json", region=None):
+    def stanza(self, *args, output="json", region=None):
         context = self.context
         stanza = [context.awscli.aws_file, "--output", output]
         if region:
@@ -112,7 +112,7 @@ class AwsCliPlugin(KubernatorPlugin):
 
         context.globals.awscli = dict(version=version,
                                       aws_file=self.aws_file,
-                                      cmd=self.cmd
+                                      stanza=self.stanza
                                       )
 
     def __repr__(self):

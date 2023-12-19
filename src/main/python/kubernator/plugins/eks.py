@@ -64,7 +64,7 @@ class EksPlugin(KubernatorPlugin):
     def handle_init(self):
         context = self.context
 
-        self.context.app.run(context.awscli.cmd(
+        self.context.app.run(context.awscli.stanza(
             "eks", "update-kubeconfig", "--name", self.name, "--kubeconfig", context.eks.kubeconfig,
             region=self.region),
             stdout_logger,

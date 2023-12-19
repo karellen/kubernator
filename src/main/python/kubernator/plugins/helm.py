@@ -106,7 +106,7 @@ class HelmPlugin(KubernatorPlugin):
     def set_context(self, context):
         self.context = context
 
-    def helm_stanza(self):
+    def stanza(self):
         context = self.context
         stanza = [context.helm.helm_file, f"--kubeconfig={context.kubeconfig.kubeconfig}"]
         if logger.getEffectiveLevel() < logging.INFO:
@@ -145,13 +145,13 @@ class HelmPlugin(KubernatorPlugin):
                                     default_excludes=Globs([".*"], True),
                                     namespace_transformer=True,
                                     helm_file=helm_file,
-                                    helm_stanza=self.helm_stanza,
+                                    stanza=self.stanza,
                                     add_helm_template=self.add_helm_template,
                                     add_helm=self.add_helm,
                                     )
 
     def handle_init(self):
-        version = self.context.app.run_capturing_out(self.helm_stanza() + ["version", "--template", "{{.Version}}"],
+        version = self.context.app.run_capturing_out(self.stanza() + ["version", "--template", "{{.Version}}"],
                                                      logger.error)
         logger.info("Found Helm version %s", version)
 
@@ -204,10 +204,10 @@ class HelmPlugin(KubernatorPlugin):
         logger.debug("Repository %s mapping to %s", repository, repository_hash)
         if repository_hash not in self.repositories:
             logger.info("Adding and updating repository %s mapping to %s", repository, repository_hash)
-            self.context.app.run(self.helm_stanza() + ["repo", "add", repository_hash, repository],
+            self.context.app.run(self.stanza() + ["repo", "add", repository_hash, repository],
                                  stdout_logger,
                                  stderr_logger).wait()
-            self.context.app.run(self.helm_stanza() + ["repo", "update"],
+            self.context.app.run(self.stanza() + ["repo", "update"],
                                  stdout_logger,
                                  stderr_logger).wait()
             self.repositories.add(repository_hash)
@@ -233,7 +233,7 @@ class HelmPlugin(KubernatorPlugin):
 
             stdin = write_stdin
 
-        resources = self.context.app.run_capturing_out(self.helm_stanza() +
+        resources = self.context.app.run_capturing_out(self.stanza() +
                                                        ["template",
                                                         name,
                                                         f"{repository_hash}/{chart}",

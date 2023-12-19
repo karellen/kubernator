@@ -70,13 +70,16 @@ class ProcessRunner:
                  safe_args=None, universal_newlines=True, **kwargs):
         self._safe_args = safe_args or args
         logger.trace("Starting %r", self._safe_args)
+
+        if "env" not in kwargs:
+            kwargs["env"] = os.environ
+
         self._proc = Popen(args,
                            stdout=PIPE if isinstance(stdout, Callable) else (stdout if stdout is not None else DEVNULL),
                            stderr=PIPE if isinstance(stderr, Callable) else (stderr if stderr is not None else DEVNULL),
                            stdin=PIPE if isinstance(stdin, (Callable, bytes, str)) else
                            (stdin if stdin is not None else DEVNULL),
                            universal_newlines=universal_newlines,
-                           env=os.environ if "env" not in kwargs else kwargs["env"],
                            **kwargs)
 
         self._stdin_writer = (spawn(partial(stream_writer_text if universal_newlines else stream_writer_buf,

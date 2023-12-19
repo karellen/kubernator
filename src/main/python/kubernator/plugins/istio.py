@@ -90,19 +90,19 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             default_includes=Globs(["*.istio.yaml", "*.istio.yml"], True),
             default_excludes=Globs([".*"], True),
             istioctl_file=istioctl_file,
-            istioctl_stanza=self.istioctl_stanza,
+            stanza=self.stanza,
             test=self.test_istioctl
         )
 
     def test_istioctl(self):
         context = self.context
-        version_out: str = context.app.run_capturing_out(context.istio.istioctl_stanza() + ["version", "-o", "json"],
+        version_out: str = context.app.run_capturing_out(context.istio.stanza() + ["version", "-o", "json"],
                                                          stderr_logger)
 
         version_out_js = json.loads(version_out)
         version = version_out_js["clientVersion"]["version"]
         logger.info("Using istioctl %r version %r with stanza %r",
-                    self.context.istio.istioctl_file, version, context.istio.istioctl_stanza())
+                    self.context.istio.istioctl_file, version, context.istio.stanza())
 
         logger.info("Found Istio client version %s", version)
 
@@ -111,7 +111,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     def set_context(self, context):
         self.context = context
 
-    def istioctl_stanza(self):
+    def stanza(self):
         context = self.context.istio
         return [context.istioctl_file, f"--kubeconfig={self.context.kubeconfig.kubeconfig}"]
 
@@ -189,9 +189,9 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
             if context.app.args.command == "apply":
                 logger.info("Running Istio precheck")
-                context.app.run(context.istio.istioctl_stanza() + ["x", "precheck"],
+                context.app.run(context.istio.stanza() + ["x", "precheck"],
                                 stdout_logger, stderr_logger).wait()
-                context.app.run(context.istio.istioctl_stanza() + ["validate", "-f", operators_file.name],
+                context.app.run(context.istio.stanza() + ["validate", "-f", operators_file.name],
                                 stdout_logger, stderr_logger).wait()
 
                 self._operator_init(operators_file, True)
@@ -230,7 +230,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 raise
 
         logger.info("Running Istio operator init%s", status_details)
-        istio_operator_init = context.istio.istioctl_stanza() + ["operator", "init", "-f", operators_file.name]
+        istio_operator_init = context.istio.stanza() + ["operator", "init", "-f", operators_file.name]
         context.app.run(istio_operator_init + (["--dry-run"] if dry_run else []),
                         stdout_logger,
                         stderr_logger).wait()

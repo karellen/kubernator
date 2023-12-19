@@ -51,7 +51,7 @@ class TerraformPlugin(KubernatorPlugin):
     def set_context(self, context):
         self.context = context
 
-    def tf_stanza(self):
+    def stanza(self):
         return [self.tf_file]
 
     def register(self, version=None):
@@ -95,7 +95,7 @@ class TerraformPlugin(KubernatorPlugin):
 
         context.globals.terraform = dict(version=version,
                                          tf_file=self.tf_file,
-                                         tf_stanza=self.tf_stanza,
+                                         stanza=self.stanza,
                                          )
 
         logger.info("Found Terraform version %s at %s", version, self.tf_file)
@@ -127,10 +127,10 @@ class TerraformPlugin(KubernatorPlugin):
         if not tf_detected:
             return
 
-        context.app.run(self.tf_stanza() + ["init", "-reconfigure", "-input=false", "-upgrade=false"],
+        context.app.run(self.stanza() + ["init", "-reconfigure", "-input=false", "-upgrade=false"],
                         stdout_logger, stderr_logger, cwd=cwd).wait()
 
-        output = json.loads(context.app.run_capturing_out(self.tf_stanza() + ["output", "-json"],
+        output = json.loads(context.app.run_capturing_out(self.stanza() + ["output", "-json"],
                                                           stderr_logger, cwd=cwd))
         if not output:
             raise RuntimeError("Terraform output produced no values. Please check if Terraform is functioning.")
