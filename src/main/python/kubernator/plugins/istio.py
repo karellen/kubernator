@@ -163,6 +163,10 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         context.istio.includes = Globs(context.istio.default_includes)
         context.istio.excludes = Globs(context.istio.default_excludes)
 
+        # Exclude Istio YAMLs from K8S resource loading
+        context.k8s.excludes.add("*.istio.yaml")
+        context.k8s.excludes.add("*.istio.yml")
+
     def handle_after_dir(self, cwd: Path):
         context = self.context
         istio = context.istio
@@ -207,7 +211,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         status_details = " (dry run)" if dry_run else ""
 
-        k8s_client = context.k8s.k8s_client
+        k8s_client = context.k8s.client
         logger.info("Creating istio-system namespace%s", status_details)
         istio_system = self.add_resource({"apiVersion": "v1",
                                           "kind": "Namespace",
