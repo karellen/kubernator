@@ -153,6 +153,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             logger.info("Bundled Kubernetes client version %s matches server version %s",
                         ".".join(self.embedded_pkg_version), ".".join(k8s.server_version))
 
+        logger.debug("Reading Kubernetes OpenAPI spec for %s", k8s.server_git_version)
+
         k8s_def = load_remote_file(logger, f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
                                            f"{k8s.server_git_version}/api/openapi-spec/swagger.json",
                                    FileType.JSON)
@@ -177,8 +179,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         k8s.server_git_version = git_version
 
         logger.info("Found Kubernetes %s on %s", k8s.server_git_version, k8s.client.configuration.host)
-
-        logger.debug("Reading Kubernetes OpenAPI spec for %s", k8s.server_git_version)
+        K8SResource._k8s_client_version = tuple(map(int, pkg_version("kubernetes").split(".")))
 
     def handle_before_dir(self, cwd: Path):
         context = self.context

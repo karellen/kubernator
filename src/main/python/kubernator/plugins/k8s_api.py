@@ -337,6 +337,8 @@ class K8SResourceKey(namedtuple("K8SResourceKey", ["group", "kind", "name", "nam
 
 
 class K8SResource:
+    _k8s_client_version = None
+
     def __init__(self, manifest: dict, rdef: K8SResourceDef, source: Union[str, Path] = None):
         self.key = self.get_manifest_key(manifest)
 
@@ -413,7 +415,7 @@ class K8SResource:
         rdef = self.rdef
         kwargs = {"name": self.name,
                   "body": json_patch
-                  if patch_type != K8SResourcePatchType.SERVER_SIDE_PATCH
+                  if patch_type != K8SResourcePatchType.SERVER_SIDE_PATCH or self._k8s_client_version[0] > 24
                   else json.dumps(json_patch),
                   "_preload_content": False,
                   "field_manager": "kubernator",

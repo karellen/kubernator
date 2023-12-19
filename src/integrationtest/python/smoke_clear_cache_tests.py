@@ -22,7 +22,7 @@ from test_support import IntegrationTestSupport, unittest
 
 class VersionSmokeTest(IntegrationTestSupport):
     def test_version(self):
-        self.smoke_test_module("kubernator", "--clear-cache")
+        self.run_module_test("kubernator", "--clear-cache")
 
 
 if __name__ == "__main__":
