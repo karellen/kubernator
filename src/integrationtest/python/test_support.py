@@ -16,13 +16,21 @@
 #   limitations under the License.
 #
 
-import sys
-from os import chdir, getcwd
-from runpy import run_module
-from unittest import TestCase
+from gevent.monkey import patch_all
+
+patch_all()
+
+# All other imports must be below
+
+import sys  # noqa: E402
+import unittest  # noqa: E402
+from os import chdir, getcwd  # noqa: E402
+from runpy import run_module  # noqa: E402
+
+__all__ = ["unittest", "IntegrationTestSupport"]
 
 
-class IntegrationTestSupport(TestCase):
+class IntegrationTestSupport(unittest.TestCase):
 
     def smoke_test_module(self, module, *args):
         old_argv = list(sys.argv)

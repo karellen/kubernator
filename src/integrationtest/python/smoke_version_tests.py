@@ -16,9 +16,13 @@
 #   limitations under the License.
 #
 
-from test_support import IntegrationTestSupport
+from test_support import IntegrationTestSupport, unittest
 
 
 class VersionSmokeTest(IntegrationTestSupport):
     def test_version(self):
         self.smoke_test_module("kubernator", "--version")
+
+
+if __name__ == "__main__":
+    unittest.main()
