@@ -673,7 +673,12 @@ class Repository:
     git_logger = logger.getChild("git")
 
     def __init__(self, repo, cred_aug=None):
+        repo = str(repo)  # in case this is a Path
         url = urllib.parse.urlsplit(repo)
+
+        if not url.scheme and not url.netloc and Path(url.path).exists():
+            url = url._replace(scheme="file")  # In case it's a local repository
+
         self.url = url
         self.url_str = urllib.parse.urlunsplit(url[:4] + ("",))
         self._cred_aug = cred_aug
@@ -715,34 +720,38 @@ class Repository:
 
         if git_cache.exists() and git_cache.is_dir() and (git_cache / ".git").exists():
             try:
-                proc = run(["git", "status"], None, None, cwd=git_cache)
-                proc.wait()
+                run(["git", "status"], None, None, cwd=git_cache).wait()
             except CalledProcessError:
                 rmtree(git_cache)
 
-        self.local_dir = str(git_cache)
+        self.local_dir = git_cache
 
         stdout_logger = StripNL(self.git_logger.debug)
         stderr_logger = StripNL(self.git_logger.info)
         if git_cache.exists():
             if not self.ref:
                 ref = run_capturing_out(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
-                                        stderr_logger, cwd=git_cache)
+                                        stderr_logger, cwd=git_cache).strip()[7:]  # Remove prefix "origin/"
             else:
                 ref = self.ref
+            self.logger.info("Using %s%s cached in %s", self.url_str,
+                             f"?ref={ref}" if not self.ref else "",
+                             self.local_dir)
+            run(["git", "config", "remote.origin.fetch", f"+refs/heads/{ref}:refs/remotes/origin/{ref}"],
+                stdout_logger, stderr_logger, cwd=git_cache).wait()
+            run(["git", "fetch", "-pPt"], stdout_logger, stderr_logger, cwd=git_cache).wait()
             run(["git", "checkout", ref], stdout_logger, stderr_logger, cwd=git_cache).wait()
             run(["git", "clean", "-f"], stdout_logger, stderr_logger, cwd=git_cache).wait()
-            run(["git", "reset", "--hard", ref], stdout_logger, stderr_logger, cwd=git_cache).wait()
+            run(["git", "reset", "--hard", ref, "--"], stdout_logger, stderr_logger, cwd=git_cache).wait()
             run(["git", "pull"], stdout_logger, stderr_logger, cwd=git_cache).wait()
         else:
             self.logger.info("Initializing %s -> %s", self.url_str, self.local_dir)
             args = (["git", "clone", "--depth", "1",
                      "-" + ("v" * log_level_to_verbosity_count(logger.getEffectiveLevel()))] +
                     (["-b", self.ref] if self.ref else []) +
-                    ["--", self.clone_url_str, self.local_dir])
+                    ["--", self.clone_url_str, str(self.local_dir)])
             safe_args = [c if c != self.clone_url_str else self.url_str for c in args]
-            proc = run(args, stdout_logger, stderr_logger, safe_args=safe_args)
-            proc.wait()
+            run(args, stdout_logger, stderr_logger, safe_args=safe_args).wait()
 
     def cleanup(self):
         if False and self.local_dir:
