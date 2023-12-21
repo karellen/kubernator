@@ -71,6 +71,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             istioctl_file_dl, _ = context.app.download_remote_file(logger, istioctl_url, "bin")
             istioctl_file_dl = str(istioctl_file_dl)
             self.istioctl_dir = tempfile.TemporaryDirectory()
+            context.app.register_cleanup(self.istioctl_dir)
 
             istioctl_file = str(Path(self.istioctl_dir.name) / "istioctl")
             istio_tar = tarfile.open(istioctl_file_dl)

@@ -124,6 +124,7 @@ class HelmPlugin(KubernatorPlugin):
             helm_file_dl, _ = context.app.download_remote_file(logger, helm_url, "bin")
             helm_file_dl = str(helm_file_dl)
             self.helm_dir = tempfile.TemporaryDirectory()
+            context.app.register_cleanup(self.helm_dir)
 
             helm_file = str(Path(self.helm_dir.name) / "helm")
             helm_tar = tarfile.open(helm_file_dl)

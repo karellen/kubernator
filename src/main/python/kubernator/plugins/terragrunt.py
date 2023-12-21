@@ -63,6 +63,8 @@ class TerragruntPlugin(KubernatorPlugin):
             tg_file_cache, _ = context.app.download_remote_file(logger, tg_url, "bin")
 
             self.tg_dir = tempfile.TemporaryDirectory()
+            context.app.register_cleanup(self.tg_dir)
+
             tg_file = Path(self.tg_dir.name) / "terragrunt"
             copy(tg_file_cache, tg_file)
             os.chmod(tg_file, 0o500)

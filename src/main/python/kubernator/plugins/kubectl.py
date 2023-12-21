@@ -51,15 +51,18 @@ class KubectlPlugin(KubernatorPlugin):
 
     def stanza(self):
         context = self.context.kubectl
-        return [context.kubectl_file, f"--kubeconfig={context.kubeconfig}"]
+        return [context.kubectl_file, f"--kubeconfig={self.context.kubeconfig.kubeconfig}"]
 
     def register(self,
                  version=None,
                  kubeconfig=None):
         context = self.context
 
+        context.app.register_plugin("kubeconfig")
 
-        kubeconfig = kubeconfig or os.environ.get("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+        if not version and "k8s" in context:
+            version = ".".join(context.k8s.server_version)
+            logger.info("Kubernetes plugin is running with server version %s - will use it", version)
 
         if version:
             # Download and use specific version
@@ -69,6 +72,7 @@ class KubectlPlugin(KubernatorPlugin):
             kubectl_file_dl, _ = context.app.download_remote_file(logger, kubectl_url, "bin")
             kubectl_file_dl = str(kubectl_file_dl)
             self.kubectl_dir = tempfile.TemporaryDirectory()
+            context.app.register_cleanup(self.kubectl_dir)
 
             kubectl_file = str(Path(self.kubectl_dir.name) / "kubectl")
             copy(kubectl_file_dl, kubectl_file)
@@ -83,7 +87,6 @@ class KubectlPlugin(KubernatorPlugin):
             logger.debug("Found kubectl in %r", kubectl_file)
 
         context.globals.kubectl = dict(version=version,
-                                       kubeconfig=kubeconfig,
                                        kubectl_file=kubectl_file,
                                        stanza=self.stanza,
                                        test=self.test_kubectl

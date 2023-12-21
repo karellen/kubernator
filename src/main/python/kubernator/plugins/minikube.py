@@ -111,6 +111,8 @@ class MinikubePlugin(KubernatorPlugin):
 
         os.chmod(minikube_dl_file, 0o500)
         self.minikube_dir = tempfile.TemporaryDirectory()
+        context.app.register_cleanup(self.minikube_dir)
+
         minikube_file = Path(self.minikube_dir.name) / "minikube"
         minikube_file.symlink_to(minikube_dl_file)
         prepend_os_path(self.minikube_dir.name)
