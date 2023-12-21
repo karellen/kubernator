@@ -65,6 +65,7 @@ class TerraformPlugin(KubernatorPlugin):
             tf_file_dl, _ = context.app.download_remote_file(logger, tf_url, "bin")
             tf_file_dl = str(tf_file_dl)
             self.tf_dir = tempfile.TemporaryDirectory()
+            context.app.register_cleanup(self.tf_dir)
 
             tf_file = str(Path(self.tf_dir.name) / "terraform")
             tf_zip = zipfile.ZipFile(tf_file_dl)

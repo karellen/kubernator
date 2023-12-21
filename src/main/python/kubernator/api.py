@@ -235,8 +235,8 @@ def install_python_k8s_client(run, package_major, logger_stdout, logger_stderr):
     if not package_major_dir.exists():
         package_major_dir.mkdir(parents=True, exist_ok=True)
 
-        run(["pip", "install", "--no-deps", "--no-cache-dir", "--no-input", "--target", str(package_major_dir),
-             f"kubernetes~={package_major}.0"], logger_stdout, logger_stderr).wait()
+        run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-cache-dir", "--no-input", "--pre",
+             "--target", str(package_major_dir), f"kubernetes~={package_major}.0"], logger_stdout, logger_stderr).wait()
 
     return package_major_dir
 
