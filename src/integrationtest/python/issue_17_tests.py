@@ -33,10 +33,10 @@ class Issue17Test(IntegrationTestSupport):
                 os.environ["K8S_VERSION"] = k8s_version
 
                 os.environ["TEST_PHASE"] = "1"
-                self.run_module_test("kubernator", "-p", str(test_dir), "apply", "--yes")
+                self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
                 os.environ["TEST_PHASE"] = "2"
-                self.run_module_test("kubernator", "-p", str(test_dir), "apply", "--yes")
+                self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
 
 if __name__ == "__main__":

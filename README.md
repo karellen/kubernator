@@ -49,6 +49,14 @@ A simple example is as follows:
 $ docker run --mount type=bind,source="$(pwd)",target=/root,readonly -t ghcr.io/karellen/kubernator:latest
 ```
 
+## Using Kubernator on MacOS
+
+```
+$ brew install python3.11
+$ pip3.11 install `kubernator~=1.0.9`
+$ kubernator --version
+```
+
 Please note, that some plugins (e.g. `awscli`, `eks`) may require additional volume mounts or environmental
 variables to be passed for credentials and other external configuration.
 

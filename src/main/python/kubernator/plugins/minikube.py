@@ -89,7 +89,7 @@ class MinikubePlugin(KubernatorPlugin):
 
     def register(self, minikube_version=None, profile="default", k8s_version=None,
                  keep_running=False, start_fresh=False,
-                 nodes=1, driver="docker", cpus="no-limit", extra_args=None):
+                 nodes=1, driver=None, cpus="no-limit", extra_args=None):
         context = self.context
 
         context.app.register_plugin("kubeconfig")
@@ -127,6 +127,31 @@ class MinikubePlugin(KubernatorPlugin):
         self.kubeconfig_dir = profile_dir / ".kube"
         self.kubeconfig_dir.mkdir(parents=True, exist_ok=True)
 
+        if not driver:
+            driver = "docker"
+            if get_golang_os() == "darwin":
+                logger.debug("Auto-detecting Minikube driver on MacOS...")
+                cmd_debug_logger = StripNL(proc_logger.debug)
+                try:
+                    context.app.run(["docker", "info"], cmd_debug_logger, cmd_debug_logger).wait()
+                    logger.info("Docker is functional, selecting 'docker' as the driver for Minikube")
+                except (FileNotFoundError, CalledProcessError) as e:
+                    logger.trace("Docker is NOT functional", exc_info=e)
+                    driver = "hyperkit"
+                    try:
+                        context.app.run(["hyperkit", "-v"], cmd_debug_logger, cmd_debug_logger).wait()
+                        logger.info("Hyperkit is functional, selecting 'hyperkit' as the driver for Minikube")
+                    except (FileNotFoundError, CalledProcessError) as e:
+                        logger.trace("Hyperkit is NOT functional", exc_info=e)
+                        driver = "podman"
+                        try:
+                            context.app.run(["podman", "info"], cmd_debug_logger, cmd_debug_logger).wait()
+                            logger.info("Podman is functional, selecting 'podman' as the driver for Minikube")
+                        except (FileNotFoundError, CalledProcessError) as e:
+                            logger.trace("Podman is NOT functional", exc_info=e)
+                            raise RuntimeError("No Minikube driver is functional on MacOS. "
+                                               "Tried 'docker', 'hyperkit' and 'podman'!")
+
         context.globals.minikube = dict(version=version,
                                         minikube_file=str(minikube_file),
                                         profile=profile,
@@ -161,12 +186,16 @@ class MinikubePlugin(KubernatorPlugin):
         minikube = self.context.minikube
         if not self.minikube_is_running():
             logger.info("Starting minikube profile %r...", minikube.profile)
-            self.cmd("start",
-                     "--driver", str(minikube.driver),
-                     "--nodes", str(minikube.nodes),
-                     "--cpus", str(minikube.cpus),
-                     "--kubernetes-version", str(minikube.k8s_version),
-                     "--wait", "apiserver")
+            args = ["start",
+                    "--driver", str(minikube.driver),
+                    "--kubernetes-version", str(minikube.k8s_version),
+                    "--wait", "apiserver",
+                    "--nodes", str(minikube.nodes)]
+
+            if minikube.driver == "docker":
+                args.extend(["--cpus", str(minikube.cpus)])
+
+            self.cmd(*args)
         else:
             logger.warning("Minikube profile %r is already running!", minikube.profile)
 
