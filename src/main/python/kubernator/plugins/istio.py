@@ -66,8 +66,18 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         if version:
             # Download and use specific version
+            istioctl_os = get_golang_os()
+            if istioctl_os == "darwin":
+                istioctl_os = "osx"
+                istioctl_machine = get_golang_machine()
+                if istioctl_machine == "amd64":
+                    istioctl_platform = istioctl_os
+                else:
+                    istioctl_platform = f"{istioctl_os}-{istioctl_machine}"
+            else:
+                istioctl_platform = f"{istioctl_os}-{get_golang_machine()}"
             istioctl_url = (f"https://github.com/istio/istio/releases/download/{version}/"
-                            f"istioctl-{version}-{get_golang_os()}-{get_golang_machine()}.tar.gz")
+                            f"istioctl-{version}-{istioctl_platform}.tar.gz")
             istioctl_file_dl, _ = context.app.download_remote_file(logger, istioctl_url, "bin")
             istioctl_file_dl = str(istioctl_file_dl)
             self.istioctl_dir = tempfile.TemporaryDirectory()

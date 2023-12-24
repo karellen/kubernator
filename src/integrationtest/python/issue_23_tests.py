@@ -34,7 +34,7 @@ class Issue23Test(IntegrationTestSupport):
                 os.environ["K8S_VERSION"] = k8s_version
                 os.environ["ISTIO_VERSION"] = istio_version
 
-                self.run_module_test("kubernator", "-p", str(test_dir), "apply", "--yes")
+                self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
 
 if __name__ == "__main__":

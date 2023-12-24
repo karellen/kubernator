@@ -34,7 +34,7 @@ class Issue27Test(IntegrationTestSupport):
             shutil.copytree(src_dir, test_dir, dirs_exist_ok=True)
             with tarfile.open(test_dir / "git.tar.gz") as tarball:
                 tarball.extractall(test_dir)
-            self.run_module_test("kubernator", "-p", str(test_dir))
+            self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE")
 
 
 if __name__ == "__main__":

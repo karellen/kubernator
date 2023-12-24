@@ -36,12 +36,12 @@ class FullSmokeTest(IntegrationTestSupport):
                 os.environ["START_FRESH"] = "1"
                 os.environ["KEEP_RUNNING"] = "1"
 
-                self.run_module_test("kubernator", "-p", str(test_dir))
+                self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE")
                 os.environ["START_FRESH"] = ""
-                self.run_module_test("kubernator", "-p", str(test_dir), "dump")
-                self.run_module_test("kubernator", "-p", str(test_dir), "apply")
+                self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "dump")
+                self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply")
                 os.environ["KEEP_RUNNING"] = ""
-                self.run_module_test("kubernator", "-p", str(test_dir), "apply", "--yes")
+                self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
 
 if __name__ == "__main__":

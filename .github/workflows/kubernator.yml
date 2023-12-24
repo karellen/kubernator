@@ -10,7 +10,7 @@ on:
       - develop
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     permissions:
       packages: write
       contents: read
@@ -18,11 +18,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        os:
+          - ubuntu-latest
         python-version:
           - '3.12'
           - '3.11'
           - '3.10'
           - '3.9'
+        #include:
+        #  - os: macos-12
+        #    python-version: '3.11'
     env:
       DEPLOY_PYTHONS: "3.11"
       DEPLOY_OSES: "Linux"
@@ -30,6 +35,47 @@ jobs:
       TWINE_USERNAME: __token__
       TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
     steps:
+      #      - name: Install Podman on MacOS
+      #        if: |
+      #          runner.os == 'macOS'
+      #
+      #        shell: bash
+      #        run: |
+      #          set -x
+      #          brew update
+      #          brew install podman
+      #          podman machine init
+      #          podman machine start
+      #          podman info
+
+      #      - name: Install HyperKit on MacOS
+      #        if: |
+      #          runner.os == 'macOS'
+      #
+      #        shell: bash
+      #        run: |
+      #          set -x
+      #          brew update
+      #          brew install hyperkit
+      #          hyperkit -v
+
+      - name: Install Docker on MacOS
+        if: |
+          runner.os == 'macOS'
+
+        shell: bash
+        run: |
+          set -x
+          brew update
+          brew install docker colima
+          
+          colima version
+          colima start --cpu 3 --memory 8 --disk 7
+          sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
+          
+          while ! docker info > /dev/null 2>&1; do sleep 1 ; done
+          docker info
+
       - name: Should Upload
         if: |
           github.event_name == 'push' &&
@@ -54,6 +100,7 @@ jobs:
       - name: Build with PyBuilder
         uses: pybuilder/build@master
         with:
+          homebrew-python: true
           python-version: ${{ matrix.python-version }}
           pyb-extra-args: ${{ env.PYB_EXTRA_ARGS }}
 
