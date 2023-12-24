@@ -53,7 +53,7 @@ $ docker run --mount type=bind,source="$(pwd)",target=/root,readonly -t ghcr.io/
 
 ```
 $ brew install python3.11
-$ pip3.11 install `kubernator~=1.0.9`
+$ pip3.11 install 'kubernator~=1.0.9'
 $ kubernator --version
 ```
 
