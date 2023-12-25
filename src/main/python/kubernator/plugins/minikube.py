@@ -116,7 +116,7 @@ class MinikubePlugin(KubernatorPlugin):
         minikube_file = Path(self.minikube_dir.name) / "minikube"
         minikube_file.symlink_to(minikube_dl_file)
         prepend_os_path(self.minikube_dir.name)
-        version_out: str = self.context.app.run_capturing_out([minikube_file, "version", "--short"],
+        version_out: str = self.context.app.run_capturing_out([str(minikube_file), "version", "--short"],
                                                               stderr_logger).strip()
         version = version_out[1:]
         logger.info("Found minikube %s in %s", version, minikube_file)
