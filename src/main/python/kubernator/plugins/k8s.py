@@ -49,6 +49,9 @@ proc_logger = logger.getChild("proc")
 stdout_logger = StripNL(proc_logger.info)
 stderr_logger = StripNL(proc_logger.warning)
 
+FIELD_VALIDATION_STRICT_MARKER = "strict decoding error: "
+VALID_FIELD_VALIDATION = ("Ignore", "Warn", "Strict")
+
 
 def final_resource_validator(resources: Sequence[K8SResource],
                              resource: K8SResource,
@@ -81,10 +84,12 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     def set_context(self, context):
         self.context = context
 
-    def register(self, **kwargs):
+    def register(self, field_validation="Strict", field_validation_warn_fatal=True):
         self.context.app.register_plugin("kubeconfig")
 
-    def handle_init(self):
+        if field_validation not in VALID_FIELD_VALIDATION:
+            raise ValueError("'field_validation' must be one of %s" % (", ".join(VALID_FIELD_VALIDATION)))
+
         context = self.context
         context.globals.k8s = dict(patch_field_excludes=("^/metadata/managedFields",
                                                          "^/metadata/generation",
@@ -108,12 +113,18 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                    add_validator=self.api_remove_validator,
                                    get_api_versions=self.get_api_versions,
                                    create_resource=self.create_resource,
+                                   field_validation=field_validation,
+                                   field_validation_warn_fatal=field_validation_warn_fatal,
+                                   field_validation_warnings=0,
                                    _k8s=self,
                                    )
         context.k8s = dict(default_includes=Globs(context.globals.k8s.default_includes),
                            default_excludes=Globs(context.globals.k8s.default_excludes)
                            )
         self.api_add_validator(final_resource_validator)
+
+    def handle_init(self):
+        pass
 
     def handle_start(self):
         self.context.kubeconfig.register_change_notifier(self._kubeconfig_changed)
@@ -180,6 +191,19 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         logger.info("Found Kubernetes %s on %s", k8s.server_git_version, k8s.client.configuration.host)
         K8SResource._k8s_client_version = tuple(map(int, pkg_version("kubernetes").split(".")))
+        K8SResource._k8s_field_validation = k8s.field_validation
+        K8SResource._logger = self.logger
+        K8SResource._api_warnings = self._api_warnings
+
+    def _api_warnings(self, resource, warn):
+        k8s = self.context.k8s
+        self.context.globals.k8s.field_validation_warnings += 1
+
+        log = self.logger.warning
+        if k8s.field_validation_warn_fatal:
+            log = self.logger.error
+
+        log("FAILED FIELD VALIDATION on resource %s from %s: %s", resource, resource.source, warn)
 
     def handle_before_dir(self, cwd: Path):
         context = self.context
@@ -205,6 +229,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
     def handle_apply(self):
         context = self.context
+        k8s = context.k8s
+
         self._validate_resources()
 
         cmd = context.app.args.command
@@ -258,6 +284,14 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                  create_func,
                                  delete_func,
                                  status_msg)
+
+        if ((dump or dry_run) and
+                k8s.field_validation_warn_fatal and self.context.globals.k8s.field_validation_warnings):
+            msg = ("There were %d field validation warnings and the warnings are fatal!" %
+                   self.context.globals.k8s.field_validation_warnings)
+            logger.fatal(msg)
+            raise RuntimeError(msg)
+
         if dump:
             if file_format in ("json", "json-pretty"):
                 json.dump(dump_results, file, sort_keys=True,
@@ -339,6 +373,19 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         rdef = resource.rdef
         rdef.populate_api(client, self.context.k8s.client)
 
+        def handle_400_strict_validation_error(e: ApiException):
+            if e.status == 400:
+                status = json.loads(e.body)
+
+                if status["status"] == "Failure" and FIELD_VALIDATION_STRICT_MARKER in status["message"]:
+                    message = status["message"]
+                    messages = message[message.find(FIELD_VALIDATION_STRICT_MARKER) +
+                                       len(FIELD_VALIDATION_STRICT_MARKER):].split(",")
+                    for m in messages:
+                        self._api_warnings(resource, m.strip())
+
+                    raise e from None
+
         def create(exists_ok=False):
             logger.info("Creating resource %s%s%s", resource, status_msg,
                         " (ignoring existing)" if exists_ok else "")
@@ -350,7 +397,6 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                         status = json.loads(e.body)
                         if status["reason"] == "AlreadyExists":
                             return
-
                 raise
 
         logger.debug("Applying resource %s%s", resource, status_msg)
@@ -359,7 +405,12 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             logger.trace("Current resource %s: %s", resource, remote_resource)
         except ApiException as e:
             if e.status == 404:
-                create()
+                try:
+                    create()
+                except ApiException as e:
+                    if not handle_400_strict_validation_error(e):
+                        raise
+
             else:
                 raise
         else:
@@ -396,7 +447,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                 return
                         raise
                 else:
-                    raise
+                    if not handle_400_strict_validation_error(e):
+                        raise
             else:
                 logger.trace("Merged resource %s: %s", resource, merged_resource)
                 patch = jsonpatch.make_patch(remote_resource, merged_resource)
