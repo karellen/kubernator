@@ -15,6 +15,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 #
+import json
 
 from gevent.monkey import patch_all
 
@@ -34,6 +35,22 @@ class IntegrationTestSupport(unittest.TestCase):
     K8S_TEST_VERSIONS = ["1.20.15", "1.21.14", "1.22.17",
                          "1.23.17", "1.24.17", "1.25.16",
                          "1.26.9", "1.27.8", "1.28.4"]
+
+    def load_json_logs(self, log_file):
+        decoder = json.JSONDecoder()
+        with open(log_file, "rt") as f:
+            buf = f.read()
+
+        result = []
+        while True:
+            if not buf:
+                break
+            obj, idx = decoder.raw_decode(buf)
+            buf = buf[idx:]
+            buf = buf.lstrip()
+            result.append(obj)
+
+        return result
 
     def run_module_test(self, module, *args):
         old_argv = list(sys.argv)
