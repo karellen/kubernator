@@ -410,7 +410,8 @@ class K8SResource:
                   "field_manager": "kubernator",
                   }
 
-        if self._k8s_client_version[0] > 22:
+        # `and not self.rdef.custom` to be removed after solving https://github.com/kubernetes-client/gen/issues/259
+        if self._k8s_client_version[0] > 22 and not self.rdef.custom:
             kwargs["field_validation"] = self._k8s_field_validation
         if rdef.namespaced:
             kwargs["namespace"] = self.namespace
@@ -430,7 +431,8 @@ class K8SResource:
                   "field_manager": "kubernator",
                   }
 
-        if self._k8s_client_version[0] > 22:
+        # `and not self.rdef.custom` to be removed after solving https://github.com/kubernetes-client/gen/issues/259
+        if self._k8s_client_version[0] > 22 and not self.rdef.custom:
             kwargs["field_validation"] = self._k8s_field_validation
         if patch_type == K8SResourcePatchType.SERVER_SIDE_PATCH:
             kwargs["force"] = force
