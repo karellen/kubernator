@@ -377,14 +377,19 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             if e.status == 400:
                 status = json.loads(e.body)
 
-                if status["status"] == "Failure" and FIELD_VALIDATION_STRICT_MARKER in status["message"]:
-                    message = status["message"]
-                    messages = message[message.find(FIELD_VALIDATION_STRICT_MARKER) +
-                                       len(FIELD_VALIDATION_STRICT_MARKER):].split(",")
-                    for m in messages:
-                        self._api_warnings(resource, m.strip())
+                if status["status"] == "Failure":
+                    if FIELD_VALIDATION_STRICT_MARKER in status["message"]:
+                        message = status["message"]
+                        messages = message[message.find(FIELD_VALIDATION_STRICT_MARKER) +
+                                           len(FIELD_VALIDATION_STRICT_MARKER):].split(",")
+                        for m in messages:
+                            self._api_warnings(resource, m.strip())
 
-                    raise e from None
+                        raise e from None
+                    else:
+                        logger.error("FAILED MODIFYING resource %s from %s: %s",
+                                     resource, resource.source, status["message"])
+                        raise e from None
 
         def create(exists_ok=False):
             logger.info("Creating resource %s%s%s", resource, status_msg,

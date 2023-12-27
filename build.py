@@ -27,7 +27,7 @@ use_plugin("python.vendorize")
 use_plugin("filter_resources")
 
 name = "kubernator"
-version = "1.0.11.dev"
+version = "1.0.11"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
@@ -91,6 +91,7 @@ def set_properties(project):
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Operating System :: MacOS :: MacOS X",
         "Operating System :: POSIX",
         "Operating System :: POSIX :: Linux",
