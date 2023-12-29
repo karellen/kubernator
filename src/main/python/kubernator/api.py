@@ -740,7 +740,7 @@ class Repository:
                              self.local_dir)
             run(["git", "config", "remote.origin.fetch", f"+refs/heads/{ref}:refs/remotes/origin/{ref}"],
                 stdout_logger, stderr_logger, cwd=git_cache).wait()
-            run(["git", "fetch", "-pPt"], stdout_logger, stderr_logger, cwd=git_cache).wait()
+            run(["git", "fetch", "-pPt", "--force"], stdout_logger, stderr_logger, cwd=git_cache).wait()
             run(["git", "checkout", ref], stdout_logger, stderr_logger, cwd=git_cache).wait()
             run(["git", "clean", "-f"], stdout_logger, stderr_logger, cwd=git_cache).wait()
             run(["git", "reset", "--hard", ref, "--"], stdout_logger, stderr_logger, cwd=git_cache).wait()
