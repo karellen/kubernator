@@ -516,6 +516,85 @@ class K8SResource:
                                          self, self.source, code, msg)
 
 
+class _LogicalOperatorFilter:
+    __slots__ = ["args"]
+    _op = None
+
+    def __init__(self, *args, **kwargs):
+        self.args = dict.fromkeys(args)
+        self.args.update(kwargs)
+
+    def __call__(self, val, func) -> bool:
+        result = True
+        for arg in self.args.items():
+            self._op(result, func(val, arg))
+        return result
+
+
+class AND(_LogicalOperatorFilter):
+    _op = bool.__iand__
+
+
+class OR(_LogicalOperatorFilter):
+    _op = bool.__ior__
+
+
+def matches_value(val, fltr):
+    if isinstance(fltr, re.Pattern):
+        return fltr.match(val)
+
+    if not isinstance(fltr, str) and isinstance(fltr, Sequence):
+        result = False
+        for f in fltr:
+            if isinstance(f, re.Pattern):
+                result |= f.match(val)
+            else:
+                result |= (val == f)
+            if result:
+                break
+        return result
+
+    return val == fltr
+
+
+def matches(r: K8SResource, group=None, version=None, kind=None, name=None, namespace=None,
+            annotations=None,
+            labels=None,
+            template_annotations=None,
+            template_labels=None, ):
+    result = ((group is None or matches_value(r.group, group)) and
+              (version is None or r.version == version) and
+              (kind is None or r.kind == kind) and
+              (name is None or r.name == name) and
+              (namespace is None or r.namespace == namespace))
+
+    if annotations is not None:
+        for filter in (annotations.items() if isinstance(annotations, Mapping) else annotations):
+            if isinstance(filter, (AND, OR)):
+                result &= filter()
+
+
+class K8SResourceList(list[K8SResource]):
+    def find(self, group=None, version=None, kind=None, name=None, namespace=None,
+             annotations=None,
+             labels=None,
+             template_annotations=None,
+             template_labels=None,
+             ) -> Iterable[K8SResource]:
+        for r in self:
+
+            if matches(r, group=None, version=None, kind=None, name=None, namespace=None,
+                       annotations=None,
+                       labels=None,
+                       template_annotations=None,
+                       template_labels=None):
+                yield r
+
+    def find_jp(self, *args: str, group=None, version=None, kind=None, name=None, namespace=None
+                ) -> Iterable[K8SResource]:
+        pass
+
+
 class K8SResourcePluginMixin:
     def __init__(self):
         self.resource_definitions: MutableMapping[K8SResourceDefKey, K8SResourceDef] = {}
