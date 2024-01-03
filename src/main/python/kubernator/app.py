@@ -32,7 +32,7 @@ from typing import Optional, Union
 import kubernator
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, PropertyDict, config_as_dict, config_parent,
                             download_remote_file, load_remote_file, Repository, StripNL, jp, get_app_cache_dir,
-                            install_python_k8s_client)
+                            get_cache_dir, install_python_k8s_client)
 from kubernator.proc import run, run_capturing_out
 
 TRACE = 5
@@ -65,8 +65,12 @@ def define_arg_parse():
                    help="print version and exit")
     g.add_argument("--clear-cache", action="store_true",
                    help="clear cache and exit")
+    g.add_argument("--clear-k8s-cache", action="store_true",
+                   help="clear Kubernetes Client cache and exit")
     g.add_argument("--pre-cache-k8s-client", action="extend", nargs="+", type=int,
-                   help="download specified K8S client library minor(!) version(s) and exit")
+                   help="download specified K8S client library major(!) version(s) and exit")
+    parser.add_argument("--pre-cache-k8s-client-no-patch", action="store_true", default=None,
+                        help="do not patch the k8s client being pre-cached")
     parser.add_argument("--log-format", choices=["human", "json"], default="human",
                         help="whether to log for human or machine consumption")
     parser.add_argument("--log-file", type=argparse.FileType("w"), default=None,
@@ -453,23 +457,37 @@ class App(KubernatorPlugin):
 
 def clear_cache():
     cache_dir = get_app_cache_dir()
-    logger.info("Clearing application cache at %s", cache_dir)
+    _clear_cache("Clearing application cache at %s", cache_dir)
+
+
+def clear_k8s_cache():
+    cache_dir = get_cache_dir("python")
+    _clear_cache("Clearing Kubernetes Client cache at %s", cache_dir)
+
+
+def _clear_cache(msg, cache_dir):
+    logger.info(msg, cache_dir)
     if cache_dir.exists():
         rmtree(cache_dir)
 
 
-def pre_cache_k8s_clients(*versions):
+def pre_cache_k8s_clients(*versions, disable_patching=False):
     proc_logger = logger.getChild("proc")
     stdout_logger = StripNL(proc_logger.info)
     stderr_logger = StripNL(proc_logger.warning)
 
     for v in versions:
-        logger.info("Caching K8S client library ~=v%s.0...", v)
-        install_python_k8s_client(run, v, stdout_logger, stderr_logger)
+        logger.info("Caching K8S client library ~=v%s.0%s...", v,
+                    " (no patches)" if disable_patching else "")
+        install_python_k8s_client(run, v, logger, stdout_logger, stderr_logger, disable_patching)
 
 
 def main():
-    args = define_arg_parse().parse_args()
+    argparser = define_arg_parse()
+    args = argparser.parse_args()
+    if not args.pre_cache_k8s_client and args.pre_cache_k8s_client_no_patch is not None:
+        argparser.error("--pre-cache-k8s-client-no-patch can only be used with --pre-cache-k8s-client")
+
     init_logging(args.verbose, args.log_format, args.log_file)
 
     try:
@@ -477,8 +495,13 @@ def main():
             clear_cache()
             return
 
+        if args.clear_k8s_cache:
+            clear_k8s_cache()
+            return
+
         if args.pre_cache_k8s_client:
-            pre_cache_k8s_clients(*args.pre_cache_k8s_client)
+            pre_cache_k8s_clients(*args.pre_cache_k8s_client,
+                                  disable_patching=args.pre_cache_k8s_client_no_patch)
             return
 
         with App(args) as app:

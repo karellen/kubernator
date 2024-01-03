@@ -84,7 +84,10 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     def set_context(self, context):
         self.context = context
 
-    def register(self, field_validation="Strict", field_validation_warn_fatal=True):
+    def register(self,
+                 field_validation="Warn",
+                 field_validation_warn_fatal=True,
+                 disable_client_patches=False):
         self.context.app.register_plugin("kubeconfig")
 
         if field_validation not in VALID_FIELD_VALIDATION:
@@ -113,6 +116,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                    add_validator=self.api_remove_validator,
                                    get_api_versions=self.get_api_versions,
                                    create_resource=self.create_resource,
+                                   disable_client_patches=disable_client_patches,
                                    field_validation=field_validation,
                                    field_validation_warn_fatal=field_validation_warn_fatal,
                                    field_validation_warnings=0,
@@ -142,27 +146,24 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             self._setup_client()
 
         server_minor = k8s.server_version[1]
-        pkg_major = self.embedded_pkg_version[0]
-        if server_minor != pkg_major:
-            logger.info("Bundled Kubernetes client version %s doesn't match server version %s",
-                        ".".join(self.embedded_pkg_version), ".".join(k8s.server_version))
-            pkg_dir = install_python_k8s_client(self.context.app.run, server_minor, stdout_logger, stderr_logger)
 
-            modules_to_delete = []
-            for k, v in sys.modules.items():
-                if k == "kubernetes" or k.startswith("kubernetes."):
-                    modules_to_delete.append(k)
-            for k in modules_to_delete:
-                del sys.modules[k]
+        logger.info("Using Kubernetes client version =~%s.0 for server version %s",
+                    server_minor, ".".join(k8s.server_version))
+        pkg_dir = install_python_k8s_client(self.context.app.run, server_minor, logger,
+                                            stdout_logger, stderr_logger, k8s.disable_client_patches)
 
-            logger.info("Adding sys.path reference to %s", pkg_dir)
-            sys.path.insert(0, str(pkg_dir))
-            self.embedded_pkg_version = self._get_kubernetes_client_version()
-            logger.info("Switching to Kubernetes client version %s", ".".join(self.embedded_pkg_version))
-            self._setup_client()
-        else:
-            logger.info("Bundled Kubernetes client version %s matches server version %s",
-                        ".".join(self.embedded_pkg_version), ".".join(k8s.server_version))
+        modules_to_delete = []
+        for k, v in sys.modules.items():
+            if k == "kubernetes" or k.startswith("kubernetes."):
+                modules_to_delete.append(k)
+        for k in modules_to_delete:
+            del sys.modules[k]
+
+        logger.info("Adding sys.path reference to %s", pkg_dir)
+        sys.path.insert(0, str(pkg_dir))
+        self.embedded_pkg_version = self._get_kubernetes_client_version()
+        logger.info("Switching to Kubernetes client version %s", ".".join(self.embedded_pkg_version))
+        self._setup_client()
 
         logger.debug("Reading Kubernetes OpenAPI spec for %s", k8s.server_git_version)
 
@@ -192,6 +193,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         logger.info("Found Kubernetes %s on %s", k8s.server_git_version, k8s.client.configuration.host)
         K8SResource._k8s_client_version = tuple(map(int, pkg_version("kubernetes").split(".")))
         K8SResource._k8s_field_validation = k8s.field_validation
+        K8SResource._k8s_field_validation_patched = not k8s.disable_client_patches
         K8SResource._logger = self.logger
         K8SResource._api_warnings = self._api_warnings
 
