@@ -22,12 +22,15 @@ unittest  # noqa
 
 from pathlib import Path  # noqa: E402
 import os  # noqa: E402
+import sys  # noqa: E402
 import tempfile  # noqa: E402
 
 
 class Issue35Test(IntegrationTestSupport):
     def test_issue_35(self):
-        test_dir = Path(__file__).parent / "issue_35"
+        issue_dir = Path(__file__).parent / "issue_35"
+        crd_dir = issue_dir / "crd"
+        test_dir = issue_dir / "test"
 
         for k8s_version in ["1.20.15", "1.23.17", "1.25.16", "1.28.4"]:
             k8s_minor = int(k8s_version[2:4])
@@ -43,29 +46,47 @@ class Issue35Test(IntegrationTestSupport):
                         os.environ["FIELD_VALIDATION"] = validation
                         os.environ["WARN_FATAL"] = "1" if warn_fatal else ""
 
-                        with tempfile.TemporaryDirectory() as temp_dir:
-                            log_file = str(Path(temp_dir) / "log")
-                            try:
-                                self.run_module_test("kubernator", "-p", str(test_dir),
-                                                     "--log-format", "json",
-                                                     "--log-file", log_file,
-                                                     "apply")
-                            except AssertionError:
-                                if ((not warn_fatal and validation == "Warn") or
-                                        validation == "Ignore" or
-                                        k8s_minor < 25):
-                                    raise
-                            logs = self.load_json_logs(log_file)
-                        validation_msg_found = False
-                        for log in logs:
-                            if "FAILED FIELD VALIDATION" in log["message"]:
-                                validation_msg_found = True
-                                break
+                        if phase == 0:
+                            self.run_module_test("kubernator", "-p", str(crd_dir),
+                                                 "-v", "DEBUG",
+                                                 "apply", "--yes")
+                            self.run_module_test("kubernator", "-p", str(test_dir),
+                                                 "-v", "DEBUG",
+                                                 "dump")
+                        logs = None
+                        try:
+                            with tempfile.TemporaryDirectory() as temp_dir:
+                                log_file = str(Path(temp_dir) / "log")
+                                try:
+                                    self.run_module_test("kubernator", "-p", str(test_dir),
+                                                         "--log-format", "json",
+                                                         "--log-file", log_file,
+                                                         "-v", "DEBUG",
+                                                         "apply")
+                                    logs = self.load_json_logs(log_file)
+                                except AssertionError:
+                                    logs = self.load_json_logs(log_file)
+                                    if ((not warn_fatal and validation == "Warn") or
+                                            validation == "Ignore" or
+                                            k8s_minor < 25):
+                                        raise
 
-                        if k8s_minor < 24 or validation == "Ignore":
-                            self.assertFalse(validation_msg_found)
-                        elif validation in ("Warn", "Strict"):
-                            self.assertTrue(validation_msg_found)
+                            validation_msg_found = False
+                            for log in logs:
+                                if "FAILED FIELD VALIDATION" in log["message"]:
+                                    validation_msg_found = True
+                                    break
+
+                            if k8s_minor < 24 or validation == "Ignore":
+                                self.assertFalse(validation_msg_found)
+                            elif validation in ("Warn", "Strict"):
+                                self.assertTrue(validation_msg_found)
+                        finally:
+                            if logs:
+                                for log in logs:
+                                    print(f"{log['ts']} {log['name']} {log['level']} {log['fn']}:{log['ln']} "
+                                          f"{log['message']}",
+                                          file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -124,7 +124,7 @@ class MinikubePlugin(KubernatorPlugin):
         profile_dir = get_cache_dir("minikube")
         self.minikube_home_dir = profile_dir
         self.minikube_home_dir.mkdir(parents=True, exist_ok=True)
-        self.kubeconfig_dir = profile_dir / ".kube"
+        self.kubeconfig_dir = profile_dir / ".kube" / profile
         self.kubeconfig_dir.mkdir(parents=True, exist_ok=True)
 
         if not driver:

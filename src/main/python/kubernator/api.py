@@ -40,6 +40,7 @@ from typing import Optional, Union, MutableSequence
 import requests
 import yaml
 from appdirs import user_config_dir
+from diff_match_patch import diff_match_patch
 from jinja2 import (Environment,
                     ChainableUndefined,
                     make_logging_undefined,
@@ -47,6 +48,9 @@ from jinja2 import (Environment,
                     pass_context)
 from jsonpath_ng.ext import parse as jp_parse
 from jsonschema import validators
+from kubernator._k8s_client_patches import (URLLIB_HEADERS_PATCH,
+                                            CUSTOM_OBJECT_PATCH_23,
+                                            CUSTOM_OBJECT_PATCH_25)
 
 _CACHE_HEADER_TRANSLATION = {"etag": "if-none-match",
                              "last-modified": "if-modified-since"}
@@ -226,20 +230,6 @@ def validator_with_defaults(validator_class):
             yield error
 
     return validators.extend(validator_class, {"properties": set_defaults})
-
-
-def install_python_k8s_client(run, package_major, logger_stdout, logger_stderr):
-    cache_dir = get_cache_dir("python")
-    package_major_dir = cache_dir / str(package_major)
-
-    if not package_major_dir.exists():
-        package_major_dir.mkdir(parents=True, exist_ok=True)
-
-        run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-cache-dir", "--no-input", "--pre",
-             "--root-user-action=ignore", "--break-system-packages", "--disable-pip-version-check",
-             "--target", str(package_major_dir), f"kubernetes~={package_major}.0"], logger_stdout, logger_stderr).wait()
-
-    return package_major_dir
 
 
 class _PropertyList(MutableSequence):
@@ -795,3 +785,63 @@ class KubernatorPlugin:
 
     def handle_shutdown(self):
         pass
+
+
+def install_python_k8s_client(run, package_major, logger, logger_stdout, logger_stderr, disable_patching):
+    cache_dir = get_cache_dir("python")
+    package_major_dir = cache_dir / str(package_major)
+    package_major_dir_str = str(package_major_dir)
+    patch_indicator = package_major_dir / ".patched"
+
+    if disable_patching and package_major_dir.exists() and patch_indicator.exists():
+        logger.info("Patching is disabled, existing Kubernetes Client %s (%s) was patched - "
+                    "deleting current client",
+                    str(package_major), package_major_dir)
+        rmtree(package_major_dir)
+
+    if not package_major_dir.exists():
+        package_major_dir.mkdir(parents=True, exist_ok=True)
+        run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-input", "--pre",
+             "--root-user-action=ignore", "--break-system-packages", "--disable-pip-version-check",
+             "--target", package_major_dir_str, f"kubernetes~={package_major}.0"], logger_stdout, logger_stderr).wait()
+
+    if not patch_indicator.exists() and not disable_patching:
+        for patch_text, target_file, skip_if_found, min_version, max_version, name in (
+                URLLIB_HEADERS_PATCH, CUSTOM_OBJECT_PATCH_23, CUSTOM_OBJECT_PATCH_25):
+            patch_target = package_major_dir / target_file
+            logger.info("Applying patch %s to %s...", name, patch_target)
+            if min_version and int(package_major) < min_version:
+                logger.info("Skipping patch %s on %s due to package major version %s below minimum %d!",
+                            name, patch_target, package_major, min_version)
+                continue
+            if max_version and int(package_major) > max_version:
+                logger.info("Skipping patch %s on %s due to package major version %s above maximum %d!",
+                            name, patch_target, package_major, max_version)
+                continue
+
+            with open(patch_target, "rt") as f:
+                target_file_original = f.read()
+            if skip_if_found in target_file_original:
+                logger.info("Skipping patch %s on %s, as it already appears to be patched!", name,
+                            patch_target)
+                continue
+
+            dmp = diff_match_patch()
+            patches = dmp.patch_fromText(patch_text)
+            target_file_patched, results = dmp.patch_apply(patches, target_file_original)
+            failed_patch = False
+            for idx, result in enumerate(results):
+                if not result:
+                    failed_patch = True
+                    msg = ("Failed to apply a patch to Kubernetes Client API %s, hunk #%d, patch: \n%s" % (
+                        patch_target, idx, patches[idx]))
+                    logger.fatal(msg)
+            if failed_patch:
+                raise RuntimeError(f"Failed to apply some Kubernetes Client API {patch_target} patches")
+
+            with open(patch_target, "wt") as f:
+                f.write(target_file_patched)
+
+        patch_indicator.touch(exist_ok=False)
+
+    return package_major_dir
