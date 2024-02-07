@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns1
+  annotations:
+    $patch: replace
+    b: y
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns2
+  annotations:
+    $patch: delete
+    b: y
+

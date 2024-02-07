@@ -39,6 +39,7 @@ from kubernator.api import (KubernatorPlugin,
                             load_remote_file,
                             StripNL,
                             install_python_k8s_client)
+from kubernator.merge import extract_merge_instructions, apply_merge_instructions
 from kubernator.plugins.k8s_api import (K8SResourcePluginMixin,
                                         K8SResource,
                                         K8SResourcePatchType,
@@ -406,6 +407,13 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                             return
                 raise
 
+        merge_instrs, normalized_manifest = extract_merge_instructions(resource.manifest, resource)
+        if merge_instrs:
+            logger.trace("Normalized manifest (no merge instructions) for resource %s: %s", resource,
+                         normalized_manifest)
+        else:
+            normalized_manifest = resource.manifest
+
         logger.debug("Applying resource %s%s", resource, status_msg)
         try:
             remote_resource = resource.get()
@@ -421,9 +429,9 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             else:
                 raise
         else:
-            logger.trace("Attempting to retrieve a normalized patch for resource %s: %s", resource, resource.manifest)
+            logger.trace("Attempting to retrieve a normalized patch for resource %s: %s", resource, normalized_manifest)
             try:
-                merged_resource = resource.patch(resource.manifest,
+                merged_resource = resource.patch(normalized_manifest,
                                                  patch_type=K8SResourcePatchType.SERVER_SIDE_PATCH,
                                                  dry_run=True,
                                                  force=True)
@@ -458,6 +466,9 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                         raise
             else:
                 logger.trace("Merged resource %s: %s", resource, merged_resource)
+                if merge_instrs:
+                    apply_merge_instructions(merge_instrs, normalized_manifest, merged_resource, logger, resource)
+
                 patch = jsonpatch.make_patch(remote_resource, merged_resource)
                 logger.trace("Resource %s initial patches are: %s", resource, patch)
                 patch = self._filter_resource_patch(patch, patch_field_excludes)
