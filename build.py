@@ -17,8 +17,8 @@
 #
 
 import textwrap
-
 from subprocess import check_call
+
 from pybuilder.core import (use_plugin, init, Author, task)
 
 use_plugin("pypi:karellen_pyb_plugin", ">=0.0.1")
@@ -57,7 +57,7 @@ def set_properties(project):
     project.depends_on("appdirs", "~=1.4")
     project.depends_on("requests", "~=2.25")
     project.depends_on("jsonpatch", "~=1.32")
-    project.depends_on("jsonpath-ng", "~=1.5")
+    project.depends_on("jsonpath-ng", "~=1.6.1")
     project.depends_on("jinja2", "~=3.1")
     project.depends_on("coloredlogs", "~=15.0")
     project.depends_on("jsonschema", "<4.0")
@@ -80,12 +80,6 @@ def set_properties(project):
     project.set_property("distutils_console_scripts", ["kubernator = kubernator:main"])
     project.set_property("distutils_setup_keywords", ["kubernetes", "k8s", "kube", "top", "provisioning",
                                                       "kOps", "terraform", "tf", "AWS"])
-
-    if False:
-        project.set_property("vendorize_target_dir", "$dir_source_main_python/kubernator/_vendor")
-        project.set_property("vendorize_packages", ["kubernetes~=28.0"])
-        project.set_property("vendorize_cleanup_globs", [])
-        project.set_property("vendorize_preserve_metadata", [])
 
     project.set_property("distutils_classifiers", [
         "License :: OSI Approved :: Apache Software License",
@@ -112,7 +106,7 @@ def set_properties(project):
                          # -*- coding: utf-8 -*-
                          #
                          #   Copyright 2020 Express Systems USA, Inc
-                         #   Copyright 2021 Karellen, Inc.
+                         #   Copyright 2024 Karellen, Inc.
                          #
                          #   Licensed under the Apache License, Version 2.0 (the "License");
                          #   you may not use this file except in compliance with the License.
