@@ -1,0 +1,3 @@
+define:
+- name: test
+  path: .test.tmpl.yaml
