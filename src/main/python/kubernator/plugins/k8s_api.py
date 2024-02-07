@@ -37,6 +37,7 @@ from openapi_schema_validator import OAS30Validator
 
 from kubernator.api import load_file, FileType, load_remote_file, calling_frame_source
 
+K8S_WARNING_HEADER = re.compile(r'(?:,\s*)?(\d{3})\s+(\S+)\s+"(.+?)(?<!\\)"(?:\s+\"(.+?)(?<!\\)\")?\s*')
 UPPER_FOLLOWED_BY_LOWER_RE = re.compile(r"(.)([A-Z][a-z]+)")
 LOWER_OR_NUM_FOLLOWED_BY_UPPER_RE = re.compile(r"([a-z0-9])([A-Z])")
 
@@ -337,6 +338,12 @@ class K8SResourceKey(namedtuple("K8SResourceKey", ["group", "kind", "name", "nam
 
 
 class K8SResource:
+    _k8s_client_version = None
+    _k8s_field_validation = None
+    _k8s_field_validation_patched = None
+    _logger = None
+    _api_warnings = None
+
     def __init__(self, manifest: dict, rdef: K8SResourceDef, source: Union[str, Path] = None):
         self.key = self.get_manifest_key(manifest)
 
@@ -401,23 +408,33 @@ class K8SResource:
         rdef = self.rdef
         kwargs = {"body": self.manifest,
                   "_preload_content": False,
-                  "field_manager": "kubernator"
+                  "field_manager": "kubernator",
                   }
+
+        # `and not self.rdef.custom` to be removed after solving https://github.com/kubernetes-client/gen/issues/259
+        if self._k8s_client_version[0] > 22 and (self._k8s_field_validation_patched or not self.rdef.custom):
+            kwargs["field_validation"] = self._k8s_field_validation
         if rdef.namespaced:
             kwargs["namespace"] = self.namespace
         if dry_run:
             kwargs["dry_run"] = "All"
-        return json.loads(rdef.create(**kwargs).data)
+        resp = rdef.create(**kwargs)
+        self._process_response_headers(resp)
+        return json.loads(resp.data)
 
     def patch(self, json_patch, *, patch_type: K8SResourcePatchType, force=False, dry_run=True):
         rdef = self.rdef
         kwargs = {"name": self.name,
                   "body": json_patch
-                  if patch_type != K8SResourcePatchType.SERVER_SIDE_PATCH
+                  if patch_type != K8SResourcePatchType.SERVER_SIDE_PATCH or self._k8s_client_version[0] > 24
                   else json.dumps(json_patch),
                   "_preload_content": False,
                   "field_manager": "kubernator",
                   }
+
+        # `and not self.rdef.custom` to be removed after solving https://github.com/kubernetes-client/gen/issues/259
+        if self._k8s_client_version[0] > 22 and (self._k8s_field_validation_patched or not self.rdef.custom):
+            kwargs["field_validation"] = self._k8s_field_validation
         if patch_type == K8SResourcePatchType.SERVER_SIDE_PATCH:
             kwargs["force"] = force
         if rdef.namespaced:
@@ -440,7 +457,9 @@ class K8SResource:
         old_func = api_client.select_header_content_type
         try:
             api_client.select_header_content_type = select_header_content_type_patch
-            return json.loads(rdef.patch(**kwargs).data)
+            resp = rdef.patch(**kwargs)
+            self._process_response_headers(resp)
+            return json.loads(resp.data)
         finally:
             api_client.select_header_content_type = old_func
 
@@ -481,6 +500,20 @@ class K8SResource:
         if not isinstance(other, K8SResource):
             return False
         return self.key == other.key and self.manifest == other.manifest
+
+    def _process_response_headers(self, resp):
+        headers = resp.headers
+        warn_headers = headers.get("Warning")
+        if warn_headers:
+            for warn in K8S_WARNING_HEADER.findall(warn_headers):
+                code, _, msg, _ = warn
+                code = int(code)
+                msg = msg.encode("utf-8").decode("unicode_escape")
+                if code == 299:
+                    self._api_warnings(self, msg)
+                else:
+                    self._logger.warning("Unknown API warning received for resource %s from %s: code %d: %s",
+                                         self, self.source, code, msg)
 
 
 class K8SResourcePluginMixin:
@@ -561,7 +594,7 @@ class K8SResourcePluginMixin:
 
     def add_remote_resources(self, url: str, file_type: FileType, *, sub_category: Optional[str] = None,
                              source: str = None):
-        manifests = load_remote_file(self.logger, url, file_type, sub_category)
+        manifests = load_remote_file(self.logger, url, file_type, sub_category=sub_category)
 
         return [self.add_resource(m, source or url) for m in manifests if m]
 
@@ -572,7 +605,7 @@ class K8SResourcePluginMixin:
 
     def add_remote_crds(self, url: str, file_type: FileType, *, sub_category: Optional[str] = None,
                         source: str = None):
-        manifests = load_remote_file(self.logger, url, file_type, sub_category)
+        manifests = load_remote_file(self.logger, url, file_type, sub_category=sub_category)
 
         return [self.add_crd(m, source or url) for m in manifests if m]
 

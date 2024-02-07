@@ -1,0 +1,4 @@
+apply:
+  - name: test
+    values:
+      name: ns1

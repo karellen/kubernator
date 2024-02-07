@@ -16,6 +16,11 @@
 #   limitations under the License.
 #
 
+from gevent.monkey import patch_all, is_anything_patched
+
+if not is_anything_patched():
+    patch_all()
+
 import unittest
 from unittest.mock import Mock
 

@@ -31,7 +31,7 @@ from kubernator.api import (KubernatorPlugin, scan_dir,
                             TemplateEngine,
                             StripNL,
                             Globs)
-from kubernator.k8s_api import K8SResourcePluginMixin
+from kubernator.plugins.k8s_api import K8SResourcePluginMixin
 from kubernator.proc import CalledProcessError
 
 logger = logging.getLogger("kubernator.kops")
@@ -50,18 +50,25 @@ OBJECT_SCHEMA_VERSION = "1.20.6"
 class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     logger = logger
 
+    _name = "kops"
+
     def __init__(self):
         self.context = None
         self.kops_stanza = ["kops"]
         self.version = None
         self.kops_dir = None
         self.kops_path = None
-        self.kubeconfig_path: Path = None
+
         self.template_engine = TemplateEngine(logger)
         super().__init__()
 
     def set_context(self, context):
         self.context = context
+
+    def register(self, helm_version=None):
+        raise RuntimeError("Currently disabled, please don't use")
+        self.context.app.register_plugin("kubeconfig")
+        self.context.app.register_plugin("kubectl")
 
     def handle_init(self):
         context = self.context

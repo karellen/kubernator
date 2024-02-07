@@ -18,7 +18,7 @@ transforming them and then applying against the Kubernetes cluster.
 
 ### Beta Software
 
-While fully functional in the current state and used in production, this software is in **EARLY BETA**. A lot of things
+While fully functional in the current state and used in production, this software is in **BETA**. A lot of things
 are expected to change rapidly, including main APIs, initialization procedures and some core features. Documentation at
 this stage is basically non-existent.
 
@@ -41,6 +41,24 @@ trademarks are property of their respective owners.
 ## Problem Statement
 
 ## Solution
+
+## Using Kubernator with Docker
+
+A simple example is as follows:
+```
+$ docker run --mount type=bind,source="$(pwd)",target=/root,readonly -t ghcr.io/karellen/kubernator:latest
+```
+
+## Using Kubernator on MacOS
+
+```
+$ brew install python3.11
+$ pip3.11 install 'kubernator~=1.0.9'
+$ kubernator --version
+```
+
+Please note, that some plugins (e.g. `awscli`, `eks`) may require additional volume mounts or environmental
+variables to be passed for credentials and other external configuration.
 
 ## Mode of Operation
 

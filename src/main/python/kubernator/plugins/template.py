@@ -92,6 +92,8 @@ TEMPLATE_VALIDATOR: Draft7Validator = TEMPLATE_VALIDATOR_CLS(TEMPLATE_SCHEMA, fo
 class TemplatePlugin(KubernatorPlugin):
     logger = logger
 
+    _name = "templates"
+
     def __init__(self):
         self.context = None
 
@@ -157,12 +159,12 @@ class TemplatePlugin(KubernatorPlugin):
             raise ValueError(f"Template with a name {name} does not exist")
 
         template = self.templates[name]
-        logger.debug("Rendering template %s from %s in %s", name, template.source, source)
+        templ_source = _get_source(name, template.source, source)
+        logger.debug("Rendering %s", templ_source)
         rendered_template = template.render(self.context, values)
 
         if self.template_engine.failures():
-            raise ValueError(f"Unable to render template {name} from {template.source} in {source} "
-                             "due to undefined required variables")
+            raise ValueError(f"Unable to render template {templ_source} due to undefined required variables")
 
         return rendered_template
 
@@ -172,8 +174,9 @@ class TemplatePlugin(KubernatorPlugin):
 
         rendered_template = self.render_template(name, source, values)
         template = self.templates[name]
-        logger.info("Applying template %s from %s", name, template.source)
-        self.context.k8s.add_resources(rendered_template, source=template.source)
+        templ_source = _get_source(name, template.source, source)
+        logger.info("Applying %s", templ_source)
+        self.context.k8s.add_resources(rendered_template, source=templ_source)
 
     def _process_template_doc(self, template_doc, source):
         logger.info("Processing Kubernator template from %s", source)
@@ -207,3 +210,9 @@ class TemplatePlugin(KubernatorPlugin):
 
     def __repr__(self):
         return "Template Plugin"
+
+
+def _get_source(name, template_def_source, template_appl_source):
+    return "template %r from %s%s" % (name, template_def_source,
+                                      "" if template_def_source == template_appl_source else
+                                      " in %s" % template_appl_source)

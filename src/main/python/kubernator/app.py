@@ -18,23 +18,22 @@
 
 import argparse
 import datetime
+import importlib
 import logging
+import pkgutil
 import sys
 import urllib.parse
 from collections import deque
 from collections.abc import MutableMapping, Callable
 from pathlib import Path
+from shutil import rmtree
 from typing import Optional, Union
 
-from kubernator.api import (KubernatorPlugin, Globs, scan_dir, ValueDict, config_as_dict, config_parent,
-                            Repository)
-from kubernator.helm import HelmPlugin
-from kubernator.istio import IstioPlugin
-from kubernator.k8s import KubernetesPlugin
-from kubernator.kops import KopsPlugin
+import kubernator
+from kubernator.api import (KubernatorPlugin, Globs, scan_dir, PropertyDict, config_as_dict, config_parent,
+                            download_remote_file, load_remote_file, Repository, StripNL, jp, get_app_cache_dir,
+                            get_cache_dir, install_python_k8s_client)
 from kubernator.proc import run, run_capturing_out
-from kubernator.template import TemplatePlugin
-from kubernator.tf import TerraformPlugin
 
 TRACE = 5
 
@@ -58,8 +57,20 @@ logger = logging.getLogger("kubernator")
 
 
 def define_arg_parse():
-    parser = argparse.ArgumentParser(description="Kubernetes Provisioning Tool",
+    parser = argparse.ArgumentParser(prog="kubernator",
+                                     description="Kubernetes Provisioning Tool",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    g = parser.add_mutually_exclusive_group()
+    g.add_argument("--version", action="version", version=kubernator.__version__,
+                   help="print version and exit")
+    g.add_argument("--clear-cache", action="store_true",
+                   help="clear cache and exit")
+    g.add_argument("--clear-k8s-cache", action="store_true",
+                   help="clear Kubernetes Client cache and exit")
+    g.add_argument("--pre-cache-k8s-client", action="extend", nargs="+", type=int,
+                   help="download specified K8S client library major(!) version(s) and exit")
+    parser.add_argument("--pre-cache-k8s-client-no-patch", action="store_true", default=None,
+                        help="do not patch the k8s client being pre-cached")
     parser.add_argument("--log-format", choices=["human", "json"], default="human",
                         help="whether to log for human or machine consumption")
     parser.add_argument("--log-file", type=argparse.FileType("w"), default=None,
@@ -72,8 +83,8 @@ def define_arg_parse():
                         help="in what format to generate results")
     parser.add_argument("-p", "--path", dest="path", default=".",
                         type=Path, help="path to start processing")
-    parser.add_argument("--pre-start-script", default=None, type=Path,
-                        help="location of the pre-start script")
+    #    parser.add_argument("--pre-start-script", default=None, type=Path,
+    #                        help="location of the pre-start script")
     #    parser.add_argument("--disconnected", action="store_true", default=False,
     #                        help="do not actually connect to the target Kubernetes")
     #    parser.add_argument("--k8s-version", type=str, default=None,
@@ -124,34 +135,29 @@ def init_logging(verbose, output_format, output_file):
     logger.setLevel(logging._nameToLevel[verbose])
 
 
-# class RepositoryPath:
-#    def __init__(self, path: Path, repository: Repository = None):
-#        self.path = path.absolute()
-#        self.repository = repository
-#
-#    def __str__(self):
-#        return self.repository.url_str if self.repository else ""
-
-
 class App(KubernatorPlugin):
+    _name = "app"
+
     def __init__(self, args):
         self.args = args
         path = args.path.absolute()
-        self._plugins: list[KubernatorPlugin] = []
 
-        global_context = ValueDict()
+        global_context = PropertyDict()
         global_context.globals = global_context
-        context = ValueDict(_parent=global_context)
+        context = PropertyDict(_parent=global_context)
+        context._plugins = []
+
         self._top_level_context = context
         self.context = context
+        self._top_dir_context = PropertyDict(_parent=self.context)
 
         self.repos: MutableMapping[Repository, Repository] = dict()
-        self.path_q: deque[tuple[ValueDict, Path]] = deque(((ValueDict(_parent=self.context), path),))
+        self.path_q: deque[tuple[PropertyDict, Path]] = deque(((self._top_dir_context, path),))
 
-        self._new_paths: list[tuple[ValueDict, Path]] = []
+        self._new_paths: list[tuple[PropertyDict, Path]] = []
 
         self._cleanups = []
-        self.register_plugin(self)
+        self._plugin_types = {}
 
     def __enter__(self):
         return self
@@ -160,63 +166,107 @@ class App(KubernatorPlugin):
         self.cleanup()
 
     def run(self):
-        context = self._top_level_context
+        logger.info("Starting Kubernator version %s", kubernator.__version__)
 
-        # Init
-        self._run_handlers(KubernatorPlugin.handle_init, False, context)
+        self.register_plugin(self)
 
-        # Pre-start
-        if self.args.pre_start_script:
-            for h in self._plugins:
-                h.set_context(context)
+        try:
+            while True:
+                cwd = self.next()
+                if not cwd:
+                    logger.debug("No paths left to traverse")
+                    break
 
-            self._exec_ktor(self.args.pre_start_script)
+                context = self.context
 
-            for h in self._plugins:
-                h.set_context(None)
+                logger.debug("Inspecting directory %s", self._display_path(cwd))
+                self._run_handlers(KubernatorPlugin.handle_before_dir, False, context, None, cwd)
 
-        # Start
-        self._run_handlers(KubernatorPlugin.handle_start, False, context)
+                if (ktor_py := (cwd / ".kubernator.py")).exists():
+                    self._run_handlers(KubernatorPlugin.handle_before_script, False, context, None, cwd)
 
-        while True:
-            cwd = self.next()
-            if not cwd:
-                logger.debug("No paths left to traverse")
-                break
+                    for h in self.context._plugins:
+                        h.set_context(context)
 
+                    self._exec_ktor(ktor_py)
+
+                    for h in self.context._plugins:
+                        h.set_context(None)
+
+                    self._run_handlers(KubernatorPlugin.handle_after_script, True, context, None, cwd)
+
+                self._run_handlers(KubernatorPlugin.handle_after_dir, True, context, None, cwd)
+
+            self.context = self._top_dir_context
             context = self.context
 
-            logger.debug("Inspecting directory %s", self._display_path(cwd))
-            self._run_handlers(KubernatorPlugin.handle_before_dir, False, context, cwd)
+            self._run_handlers(KubernatorPlugin.handle_apply, True, context, None)
 
-            if (ktor_py := (cwd / ".kubernator.py")).exists():
-                self._run_handlers(KubernatorPlugin.handle_before_script, False, context, cwd)
+            self._run_handlers(KubernatorPlugin.handle_verify, True, context, None)
+        finally:
+            self.context = self._top_dir_context
+            context = self.context
+            self._run_handlers(KubernatorPlugin.handle_shutdown, True, context, None)
 
-                for h in self._plugins:
-                    h.set_context(context)
+    def discover_plugins(self):
+        importlib.invalidate_caches()
+        search_path = Path(kubernator.__path__[0], "plugins")
+        [importlib.import_module(name)
+         for finder, name, is_pkg in
+         pkgutil.iter_modules([str(search_path)], "kubernator.plugins.")]
 
-                self._exec_ktor(ktor_py)
+        for plugin in KubernatorPlugin.__subclasses__():
+            if plugin._name in self._plugin_types:
+                logger.warning("Plugin named %r in %r is already reserved by %r and will be ignored",
+                               plugin._name,
+                               plugin,
+                               self._plugin_types[plugin._name])
+            else:
+                logger.info("Plugin %r discovered in %r", plugin._name, plugin)
+                self._plugin_types[plugin._name] = plugin
 
-                for h in self._plugins:
-                    h.set_context(None)
-
-                self._run_handlers(KubernatorPlugin.handle_after_script, True, context, cwd)
-
-            self._run_handlers(KubernatorPlugin.handle_after_dir, True, context, cwd)
-
-        self.context = self._top_level_context
+    def register_plugin(self, plugin: Union[KubernatorPlugin, type, str], **kwargs):
         context = self.context
+        if isinstance(plugin, str):
+            try:
+                plugin_obj = self._plugin_types[plugin]()
+            except KeyError:
+                logger.critical("No known plugin with the name %r", plugin)
+                raise RuntimeError("No known plugin with the name %r" % (plugin,))
+        elif isinstance(plugin, type):
+            plugin_obj = plugin()
+        else:
+            plugin_obj = plugin
 
-        self._run_handlers(KubernatorPlugin.handle_apply, True, context)
+        for p in context._plugins:
+            if p._name == plugin_obj._name:
+                logger.info("Plugin with name %r already registered, skipping", p._name)
+                return
 
-        self._run_handlers(KubernatorPlugin.handle_verify, True, context)
+        logger.info("Registering plugin %r via %r", plugin_obj._name, plugin_obj)
 
-    def register_plugin(self, handler: KubernatorPlugin):
-        self._plugins.append(handler)
-        logger.debug("Registered handler %r", handler)
+        # Register
+        self._run_handlers(KubernatorPlugin.register, False, context, plugin_obj, **kwargs)
 
-    def _run_handlers(self, f, reverse, context, *args, **kwargs):
-        f_name = f.__name__
+        context._plugins.append(plugin_obj)
+
+        # Init
+        self._run_handlers(KubernatorPlugin.handle_init, False, context, plugin_obj)
+
+        # Start
+        self._run_handlers(KubernatorPlugin.handle_start, False, context, plugin_obj)
+
+        # If we're already processing a directory
+        if "app" in self.context and "cwd" in self.context.app and self.context.app.cwd:
+            cwd = self.context.app.cwd
+            self._run_handlers(KubernatorPlugin.handle_before_dir, False, context, plugin_obj, cwd)
+
+            # If we're already in the script (TODO: is it possible to NOT be in a script?)
+            if "script" in self.context.app:
+                self._run_handlers(KubernatorPlugin.handle_before_script, False, context, plugin_obj, cwd)
+
+    def _run_handlers(self, __f, __reverse, __context, __plugin, *args, **kwargs):
+        f_name = __f.__name__
 
         def run(h):
             h_f = getattr(h, f_name, None)
@@ -224,10 +274,14 @@ class App(KubernatorPlugin):
                 logger.trace("Running %r handler on %r with %r, %r", f_name, h, args, kwargs)
                 h_f(*args, **kwargs)
 
-        self._set_handler_context(reverse, context, run)
+        if __plugin:
+            __plugin.set_context(__context)
+            run(__plugin)
+        else:
+            self._set_plugin_context(__reverse, __context, run)
 
-    def _set_handler_context(self, reverse, context, run):
-        for h in list(self._plugins if not reverse else reversed(self._plugins)):
+    def _set_plugin_context(self, reverse, context, run):
+        for h in list(self.context._plugins if not reverse else reversed(self.context._plugins)):
             h.set_context(context)
             run(h)
             h.set_context(None)
@@ -245,7 +299,7 @@ class App(KubernatorPlugin):
         logger.debug("Executed %r", ktor_py_display_path)
 
     def next(self) -> Path:
-        path_queue: deque[tuple[ValueDict, Path]] = self.path_q
+        path_queue: deque[tuple[PropertyDict, Path]] = self.path_q
         if path_queue:
             self.context, path = path_queue.pop()
             return path
@@ -259,6 +313,9 @@ class App(KubernatorPlugin):
         for h in self._cleanups:
             h.cleanup()
 
+    def register(self, **kwargs):
+        self.discover_plugins()
+
     def handle_init(self):
         context = self.context
 
@@ -268,13 +325,17 @@ class App(KubernatorPlugin):
                                    repository_credentials_provider=self._repository_credentials_provider,
                                    walk_remote=self.walk_remote,
                                    walk_local=self.walk_local,
-                                   register_plugin=lambda *args, **kwargs: True,
+                                   register_plugin=self.register_plugin,
                                    config_as_dict=config_as_dict,
                                    config_parent=config_parent,
+                                   download_remote_file=download_remote_file,
+                                   load_remote_file=load_remote_file,
                                    register_cleanup=self.register_cleanup,
+                                   jp=jp,
                                    run=self._run,
                                    run_capturing_out=self._run_capturing_out,
                                    repository=self.repository,
+                                   StripNL=StripNL,
                                    default_includes=Globs(["*"], True),
                                    default_excludes=Globs([".*"], True),
                                    )
@@ -293,14 +354,26 @@ class App(KubernatorPlugin):
         app.cwd = cwd
         self._new_paths = []
 
+    def handle_before_script(self, cwd: Path):
+        context = self.context
+        app = context.app
+        app.script = (cwd / ".kubernator.py")
+
+    def handle_after_script(self, cwd: Path):
+        context = self.context
+        app = context.app
+        del app.script
+
     def handle_after_dir(self, cwd: Path):
         context = self.context
         app = context.app
 
         for f in scan_dir(logger, cwd, lambda d: d.is_dir(), app.excludes, app.includes):
-            self._new_paths.append((ValueDict(_parent=context), f))
+            self._new_paths.append((PropertyDict(_parent=context), f))
 
         self.path_q.extend(reversed(self._new_paths))
+
+        del app.cwd
 
     def repository(self, repo):
         repository = Repository(repo, self._repo_cred_augmentation)
@@ -308,19 +381,19 @@ class App(KubernatorPlugin):
             repository = self.repos[repository]
         else:
             self.repos[repository] = repository
-            repository.init(logger, self.context.app.run)
+            repository.init(logger, self.context)
             self.register_cleanup(repository)
 
         return repository
 
-    def walk_local(self, *paths: Union[Path, str, bytes]):
+    def walk_local(self, *paths: Union[Path, str, bytes], keep_context=False):
         for path in paths:
             p = Path(path)
             if not p.is_absolute():
                 p = self.context.app.cwd / p
-            self._add_local(p)
+            self._add_local(p, keep_context)
 
-    def walk_remote(self, repo, *path_prefixes: Union[Path, str, bytes]):
+    def walk_remote(self, repo, *path_prefixes: Union[Path, str, bytes], keep_context=False):
         repository = self.repository(repo)
 
         if path_prefixes:
@@ -328,22 +401,23 @@ class App(KubernatorPlugin):
                 path = Path(path_prefix)
                 if path.is_absolute():
                     path = Path(*path.parts[1:])
-                self._add_local(repository.local_dir / path)
+                self._add_local(repository.local_dir / path, keep_context)
         else:
-            self._add_local(repository.local_dir)
+            self._add_local(repository.local_dir, keep_context)
 
     def set_context(self, context):
         # We are managing the context for everyone so we don't actually set it anywhere
         pass
 
-    def _add_local(self, path: Path):
-        logger.info("Adding %s to the plan", self._display_path(path))
-        self._new_paths.append((ValueDict(_parent=self.context), path))
+    def _add_local(self, path: Path, keep_context=False):
+        logger.info("Adding %s to the plan%s", self._display_path(path),
+                    " (in parent context)" if keep_context else "")
+        self._new_paths.append((self.context if keep_context else PropertyDict(_parent=self.context), path))
 
     def _repository_credentials_provider(self,
                                          provider: Optional[
-                                             Callable[[urllib.parse.SplitResult],
-                                                      tuple[Optional[str], Optional[str], Optional[str]]]]):
+                                             Callable[[urllib.parse.SplitResult], tuple[
+                                                 Optional[str], Optional[str], Optional[str]]]]):
         self.context.app._repository_credentials_provider = provider
 
     def _repo_cred_augmentation(self, url):
@@ -381,18 +455,56 @@ class App(KubernatorPlugin):
         return "Kubernator"
 
 
+def clear_cache():
+    cache_dir = get_app_cache_dir()
+    _clear_cache("Clearing application cache at %s", cache_dir)
+
+
+def clear_k8s_cache():
+    cache_dir = get_cache_dir("python")
+    _clear_cache("Clearing Kubernetes Client cache at %s", cache_dir)
+
+
+def _clear_cache(msg, cache_dir):
+    logger.info(msg, cache_dir)
+    if cache_dir.exists():
+        rmtree(cache_dir)
+
+
+def pre_cache_k8s_clients(*versions, disable_patching=False):
+    proc_logger = logger.getChild("proc")
+    stdout_logger = StripNL(proc_logger.info)
+    stderr_logger = StripNL(proc_logger.warning)
+
+    for v in versions:
+        logger.info("Caching K8S client library ~=v%s.0%s...", v,
+                    " (no patches)" if disable_patching else "")
+        install_python_k8s_client(run, v, logger, stdout_logger, stderr_logger, disable_patching)
+
+
 def main():
-    args = define_arg_parse().parse_args()
+    argparser = define_arg_parse()
+    args = argparser.parse_args()
+    if not args.pre_cache_k8s_client and args.pre_cache_k8s_client_no_patch is not None:
+        argparser.error("--pre-cache-k8s-client-no-patch can only be used with --pre-cache-k8s-client")
+
     init_logging(args.verbose, args.log_format, args.log_file)
 
     try:
+        if args.clear_cache:
+            clear_cache()
+            return
+
+        if args.clear_k8s_cache:
+            clear_k8s_cache()
+            return
+
+        if args.pre_cache_k8s_client:
+            pre_cache_k8s_clients(*args.pre_cache_k8s_client,
+                                  disable_patching=args.pre_cache_k8s_client_no_patch)
+            return
+
         with App(args) as app:
-            app.register_plugin(TerraformPlugin())
-            app.register_plugin(KopsPlugin())
-            app.register_plugin(KubernetesPlugin())
-            app.register_plugin(IstioPlugin())
-            app.register_plugin(HelmPlugin())
-            app.register_plugin(TemplatePlugin())
             app.run()
     except SystemExit as e:
         return e.code
