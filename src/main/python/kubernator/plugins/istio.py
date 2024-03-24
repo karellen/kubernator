@@ -134,6 +134,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         version, version_out_js = self.test_istioctl()
         self.client_version = tuple(version.split("."))
+        client_version_numeric = tuple(map(int, self.client_version))
         mesh_versions = set(tuple(m.value.split(".")) for m in MESH_PILOT_JP.find(version_out_js))
 
         if mesh_versions:
@@ -160,7 +161,12 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                                             f"/api/openapi-spec/swagger.json",
                                                             FileType.JSON)
         self._populate_resource_definitions()
-        self.add_remote_crds(f"{url_prefix}/crd-operator.yaml", FileType.YAML)
+
+        if client_version_numeric < (1, 21):
+            self.add_remote_crds(f"{url_prefix}/crd-operator.yaml", FileType.YAML)
+        else:
+            self.add_remote_crds("https://raw.githubusercontent.com/istio/istio/release-1.20/manifests/charts/"
+                                 "base/crds/crd-operator.yaml", FileType.YAML)
 
         # Exclude Istio YAMLs from K8S resource loading
         context.k8s.default_excludes.add("*.istio.yaml")
