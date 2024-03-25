@@ -134,7 +134,6 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         version, version_out_js = self.test_istioctl()
         self.client_version = tuple(version.split("."))
-        client_version_numeric = tuple(map(int, self.client_version))
         mesh_versions = set(tuple(m.value.split(".")) for m in MESH_PILOT_JP.find(version_out_js))
 
         if mesh_versions:
@@ -150,9 +149,9 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             self.provision_operator = True
 
         # Register Istio-related CRDs with K8S
-        url_prefix = (f"https://raw.githubusercontent.com/istio/istio/{'.'.join(self.client_version)}/"
-                      "manifests/charts/base/crds")
-        self.context.k8s.load_remote_crds(f"{url_prefix}/crd-all.gen.yaml", "yaml")
+        self.context.k8s.load_remote_crds(
+            f"https://raw.githubusercontent.com/istio/istio/{'.'.join(self.client_version)}/"
+            "manifests/charts/base/crds/crd-all.gen.yaml", "yaml")
 
         # This plugin only deals with Istio Operator, so only load that stuff
         self.resource_definitions_schema = load_remote_file(logger,
@@ -162,11 +161,8 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                                             FileType.JSON)
         self._populate_resource_definitions()
 
-        if client_version_numeric < (1, 21):
-            self.add_remote_crds(f"{url_prefix}/crd-operator.yaml", FileType.YAML)
-        else:
-            self.add_remote_crds("https://raw.githubusercontent.com/istio/istio/release-1.20/manifests/charts/"
-                                 "base/crds/crd-operator.yaml", FileType.YAML)
+        self.add_remote_crds(f"https://raw.githubusercontent.com/istio/istio/{'.'.join(self.client_version)}/"
+                             f"manifests/charts/istio-operator/crds/crd-operator.yaml", FileType.YAML)
 
         # Exclude Istio YAMLs from K8S resource loading
         context.k8s.default_excludes.add("*.istio.yaml")
