@@ -29,6 +29,8 @@ from pathlib import Path
 from shutil import rmtree
 from typing import Optional, Union
 
+import yaml
+
 import kubernator
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, PropertyDict, config_as_dict, config_parent,
                             download_remote_file, load_remote_file, Repository, StripNL, jp, get_app_cache_dir,
@@ -54,6 +56,11 @@ def trace(self, msg, *args, **kwargs):
 logging.addLevelName(5, "TRACE")
 logging.Logger.trace = trace
 logger = logging.getLogger("kubernator")
+
+try:
+    del (yaml.resolver.Resolver.yaml_implicit_resolvers["="])
+except KeyError:
+    pass
 
 
 def define_arg_parse():
