@@ -38,7 +38,7 @@ from typing import Optional, Union, MutableSequence
 
 import requests
 import yaml
-from appdirs import user_config_dir
+from platformdirs import user_cache_dir
 from diff_match_patch import diff_match_patch
 from jinja2 import (Environment,
                     ChainableUndefined,
@@ -118,17 +118,17 @@ def _download_remote_file(url, file_name, cache: dict):
 
 
 def get_app_cache_dir():
-    return Path(user_config_dir("kubernator"))
+    return Path(user_cache_dir("kubernator", "karellen"))
 
 
 def get_cache_dir(category: str, sub_category: str = None):
-    config_dir = get_app_cache_dir() / category
+    cache_dir = get_app_cache_dir() / category
     if sub_category:
-        config_dir = config_dir / sub_category
-    if not config_dir.exists():
-        config_dir.mkdir(parents=True)
+        cache_dir = cache_dir / sub_category
+    if not cache_dir.exists():
+        cache_dir.mkdir(parents=True)
 
-    return config_dir
+    return cache_dir
 
 
 def download_remote_file(logger, url: str, category: str = "k8s", sub_category: str = None,
