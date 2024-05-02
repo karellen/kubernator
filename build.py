@@ -54,7 +54,7 @@ def set_properties(project):
     project.depends_on("openapi-schema-validator", "~=0.1")
     project.depends_on("openapi-spec-validator", "~=0.3")
     project.depends_on("json-log-formatter", "~=0.3")
-    project.depends_on("appdirs", "~=1.4")
+    project.depends_on("platformdirs", "~=4.2")
     project.depends_on("requests", "~=2.25")
     project.depends_on("jsonpatch", "~=1.32")
     project.depends_on("jsonpath-ng", "~=1.6.1")
