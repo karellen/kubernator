@@ -747,6 +747,9 @@ class KubernatorPlugin:
     def handle_shutdown(self):
         pass
 
+    def handle_summary(self):
+        pass
+
 
 def install_python_k8s_client(run, package_major, logger, logger_stdout, logger_stderr, disable_patching):
     cache_dir = get_cache_dir("python")

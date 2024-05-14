@@ -81,6 +81,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         self._transformers = []
         self._validators = []
+        self._summary = 0, 0, 0
 
     def set_context(self, context):
         self.context = context
@@ -248,6 +249,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         patch_field_excludes = [re.compile(e) for e in context.globals.k8s.patch_field_excludes]
         dump_results = []
+        total_created, total_patched, total_deleted = 0, 0, 0
         for resource in self.resources.values():
             if dump:
                 resource_id = {"apiVersion": resource.api_version,
@@ -280,13 +282,17 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 create_func = partial(resource.create, dry_run=dry_run)
                 delete_func = partial(resource.delete, dry_run=dry_run)
 
-            self._apply_resource(dry_run,
-                                 patch_field_excludes,
-                                 resource,
-                                 patch_func,
-                                 create_func,
-                                 delete_func,
-                                 status_msg)
+            created, patched, deleted = self._apply_resource(dry_run,
+                                                             patch_field_excludes,
+                                                             resource,
+                                                             patch_func,
+                                                             create_func,
+                                                             delete_func,
+                                                             status_msg)
+
+            total_created += created
+            total_patched += patched
+            total_deleted += deleted
 
         if ((dump or dry_run) and
                 k8s.field_validation_warn_fatal and self.context.globals.k8s.field_validation_warnings):
@@ -301,6 +307,12 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                           indent=4 if file_format == "json-pretty" else None)
             else:
                 yaml.safe_dump(dump_results, file)
+        else:
+            self._summary = total_created, total_patched, total_deleted
+
+    def handle_summary(self):
+        total_created, total_patched, total_deleted = self._summary
+        logger.info("Created %d, patched %d, deleted %d resources", total_created, total_patched, total_deleted)
 
     def api_load_resources(self, path: Path, file_type: str):
         return self.add_local_resources(path, FileType[file_type.upper()])
@@ -422,6 +434,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             if e.status == 404:
                 try:
                     create()
+                    return 1, 0, 0
                 except ApiException as e:
                     if not handle_400_strict_validation_error(e):
                         raise
@@ -459,7 +472,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                             status_msg)
                                 delete_func(propagation_policy=propagation_policy)
                                 create(exists_ok=dry_run)
-                                return
+                                return 1, 0, 1
                         raise
                 else:
                     if not handle_400_strict_validation_error(e):
@@ -476,8 +489,10 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 if patch:
                     logger.info("Patching resource %s%s", resource, status_msg)
                     patch_func(patch)
+                    return 0, 1, 0
                 else:
                     logger.info("Nothing to patch for resource %s", resource)
+                    return 0, 0, 0
 
     def _filter_resource_patch(self, patch: Iterable[Mapping], excludes: Iterable[re.compile]):
         result = []

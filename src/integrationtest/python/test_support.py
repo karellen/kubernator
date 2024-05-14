@@ -34,8 +34,8 @@ __all__ = ["unittest", "IntegrationTestSupport"]
 class IntegrationTestSupport(unittest.TestCase):
     K8S_TEST_VERSIONS = ["1.20.15", "1.21.14", "1.22.17",
                          "1.23.17", "1.24.17", "1.25.16",
-                         "1.26.15", "1.27.12", "1.28.8",
-                         "1.29.3"]
+                         "1.26.15", "1.27.13", "1.28.9",
+                         "1.29.4"]
 
     def load_json_logs(self, log_file):
         decoder = json.JSONDecoder()
