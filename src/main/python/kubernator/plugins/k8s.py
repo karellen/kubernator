@@ -68,6 +68,19 @@ def final_resource_validator(resources: Sequence[K8SResource],
                     resource, resource.source)
 
 
+def normalize_pkg_version(v: str):
+    v_split = v.split(".")
+    rev = v_split[-1]
+    if not rev.isdigit():
+        new_rev = ""
+        for c in rev:
+            if not c.isdigit():
+                break
+            new_rev += c
+        v_split[-1] = new_rev
+    return tuple(map(int, v_split))
+
+
 class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     logger = logger
 
@@ -193,7 +206,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         k8s.server_git_version = git_version
 
         logger.info("Found Kubernetes %s on %s", k8s.server_git_version, k8s.client.configuration.host)
-        K8SResource._k8s_client_version = tuple(map(int, pkg_version("kubernetes").split(".")))
+
+        K8SResource._k8s_client_version = normalize_pkg_version(pkg_version("kubernetes"))
         K8SResource._k8s_field_validation = k8s.field_validation
         K8SResource._k8s_field_validation_patched = not k8s.disable_client_patches
         K8SResource._logger = self.logger
