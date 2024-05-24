@@ -27,7 +27,7 @@ use_plugin("python.vendorize")
 use_plugin("filter_resources")
 
 name = "kubernator"
-version = "1.0.16.dev"
+version = "1.0.16"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
@@ -55,7 +55,7 @@ def set_properties(project):
     project.depends_on("openapi-spec-validator", "~=0.3")
     project.depends_on("json-log-formatter", "~=0.3")
     project.depends_on("platformdirs", "~=4.2")
-    project.depends_on("requests", "~=2.31.0")
+    project.depends_on("requests", "<=2.31.0")
     project.depends_on("jsonpatch", "~=1.32")
     project.depends_on("jsonpath-ng", "~=1.6.1")
     project.depends_on("jinja2", "~=3.1")
