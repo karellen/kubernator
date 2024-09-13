@@ -38,7 +38,6 @@ from typing import Optional, Union, MutableSequence
 
 import requests
 import yaml
-from platformdirs import user_cache_dir
 from diff_match_patch import diff_match_patch
 from jinja2 import (Environment,
                     ChainableUndefined,
@@ -46,6 +45,7 @@ from jinja2 import (Environment,
                     Template as JinjaTemplate,
                     pass_context)
 from jsonschema import validators
+from platformdirs import user_cache_dir
 
 from kubernator._json_path import jp  # noqa: F401
 from kubernator._k8s_client_patches import (URLLIB_HEADERS_PATCH,
@@ -765,9 +765,10 @@ def install_python_k8s_client(run, package_major, logger, logger_stdout, logger_
 
     if not package_major_dir.exists():
         package_major_dir.mkdir(parents=True, exist_ok=True)
-        run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-input", "--pre",
+        run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-input",
              "--root-user-action=ignore", "--break-system-packages", "--disable-pip-version-check",
-             "--target", package_major_dir_str, f"kubernetes~={package_major}.0"], logger_stdout, logger_stderr).wait()
+             "--target", package_major_dir_str, f"kubernetes>={package_major!s}dev0,<{int(package_major) + 1!s}"],
+            logger_stdout, logger_stderr).wait()
 
     if not patch_indicator.exists() and not disable_patching:
         for patch_text, target_file, skip_if_found, min_version, max_version, name in (

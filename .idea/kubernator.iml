@@ -8,7 +8,7 @@
       <excludeFolder url="file://$MODULE_DIR$/.pybuilder" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.9 (kubernator)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.11 (kubernator-3.11.4)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyDocumentationSettings">
