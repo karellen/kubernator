@@ -50,7 +50,8 @@ default_task = ["analyze", "publish"]
 @init
 def set_properties(project):
     project.depends_on("gevent", ">=21.1.2")
-    project.depends_on("kubernetes", "~=29.0")
+    project.depends_on("kubernetes", "~=30.0")
+    project.depends_on("durationpy", ">=0.7")
     project.depends_on("openapi-schema-validator", "~=0.1")
     project.depends_on("openapi-spec-validator", "~=0.3")
     project.depends_on("json-log-formatter", "~=0.3")
