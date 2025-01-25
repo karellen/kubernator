@@ -26,7 +26,7 @@ import os  # noqa: E402
 
 class Issue52Test(IntegrationTestSupport):
     def test_issue_52(self):
-        test_dir = Path(__file__).parent / "issue_23"
+        test_dir = Path(__file__).parent / "issue_52"
 
         for k8s_version, istio_version in ((self.K8S_TEST_VERSIONS[-3], "1.20.4"),
                                            (self.K8S_TEST_VERSIONS[-1], "1.22.0")):

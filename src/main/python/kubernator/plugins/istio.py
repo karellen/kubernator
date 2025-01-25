@@ -53,6 +53,9 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         self.client_version = None
         self.server_version = None
         self.provision_operator = False
+        self.install = False
+        self.upgrade = False
+        self.upgrade_from_operator = False
         self.template_engine = TemplateEngine(logger)
 
         self.istioctl_dir = None
@@ -133,25 +136,41 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         context = self.context
 
         version, version_out_js = self.test_istioctl()
-        self.client_version = tuple(version.split("."))
-        mesh_versions = set(tuple(m.value.split(".")) for m in MESH_PILOT_JP.find(version_out_js))
+        self.client_version = tuple(map(int, version.split(".")))
+        mesh_versions = set(tuple(map(int, m.value.split("."))) for m in MESH_PILOT_JP.find(version_out_js))
 
         if mesh_versions:
             self.server_version = max(mesh_versions)
 
         if not self.server_version:
             logger.info("No Istio mesh has been found and it'll be created")
+            self.install = True
             self.provision_operator = True
-        elif self.server_version < self.client_version:
-            logger.info("Istio client is version %s while server is up to %s - operator will be upgraded",
-                        ".".join(self.client_version),
-                        ".".join(self.server_version))
+        elif self.server_version != self.client_version:
+            logger.info("Istio client is version %s while server is up to %s - up/downgrade will be performed",
+                        ".".join(map(str, self.client_version)),
+                        ".".join(map(str, self.server_version)))
+            self.upgrade = True
             self.provision_operator = True
 
+        if self.client_version >= (1, 24, 0):
+            # No more operator in 1.24.0+
+            self.provision_operator = False
+
+        if self.upgrade and (self.client_version >= (1, 24, 0) > self.server_version):
+            self.upgrade_from_operator = True
+
+        if self.upgrade and (self.client_version < (1, 24, 0) <= self.server_version):
+            raise ValueError(f"Unable to downgrade Istio from {self.server_version} to {self.client_version}")
+
         # Register Istio-related CRDs with K8S
+        if self.client_version >= (1, 24, 0):
+            crd_path = "manifests/charts/base/files/crd-all.gen.yaml"
+        else:
+            crd_path = "manifests/charts/base/crds/crd-all.gen.yaml"
         self.context.k8s.load_remote_crds(
-            f"https://raw.githubusercontent.com/istio/istio/{'.'.join(self.client_version)}/"
-            "manifests/charts/base/crds/crd-all.gen.yaml", "yaml")
+            f"https://raw.githubusercontent.com/istio/istio/{'.'.join(map(str, self.client_version))}/{crd_path}",
+            "yaml")
 
         # This plugin only deals with Istio Operator, so only load that stuff
         self.resource_definitions_schema = load_remote_file(logger,
@@ -161,8 +180,10 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                                             FileType.JSON)
         self._populate_resource_definitions()
 
-        self.add_remote_crds(f"https://raw.githubusercontent.com/istio/istio/{'.'.join(self.client_version)}/"
-                             f"manifests/charts/istio-operator/crds/crd-operator.yaml", FileType.YAML)
+        crd_operator_version = (1, 23, 4) if self.client_version >= (1, 24, 0) else self.client_version
+        self.add_remote_crds(
+            f"https://raw.githubusercontent.com/istio/istio/{'.'.join(map(str, crd_operator_version))}/"
+            f"manifests/charts/istio-operator/crds/crd-operator.yaml", FileType.YAML)
 
         # Exclude Istio YAMLs from K8S resource loading
         context.k8s.default_excludes.add("*.istio.yaml")
@@ -211,40 +232,117 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 context.app.run(context.istio.stanza() + ["validate", "-f", operators_file.name],
                                 stdout_logger, stderr_logger).wait()
 
-                self._operator_init(operators_file, True)
+                dry_run = context.app.args.dry_run
 
-                if not context.app.args.dry_run:
-                    self._operator_init(operators_file, False)
+                if self.provision_operator:
+                    self._create_istio_system_ns(True)
+                    self._operator_init(operators_file, True)
 
-    def _operator_init(self, operators_file, dry_run):
+                    if not dry_run:
+                        self._create_istio_system_ns(False)
+                        self._operator_init(operators_file, False)
+                elif self.install:
+                    self._install(operators_file, True)
+
+                    if not dry_run:
+                        self._install(operators_file, False)
+                elif self.upgrade:
+                    def _upgrade(dry_run):
+                        if self.upgrade_from_operator:
+                            # delete deployment -n istio-system istio-operator
+                            self._delete_resource_internal({"apiVersion": "apps/v1",
+                                                            "kind": "Deployment",
+                                                            "metadata":
+                                                                {
+                                                                    "namespace": "istio-system",
+                                                                    "name": "istio-operator"
+                                                                }
+                                                            }, dry_run, True)
+                        self._upgrade(operators_file, dry_run)
+
+                    _upgrade(True)
+                    if not dry_run:
+                        _upgrade(False)
+
+    def _delete_resource_internal(self, manifest, dry_run=True, missing_ok=False):
         from kubernetes import client
         from kubernetes.client.rest import ApiException
 
         context = self.context
-
-        status_details = " (dry run)" if dry_run else ""
-
         k8s_client = context.k8s.client
-        logger.info("Creating istio-system namespace%s", status_details)
-        istio_system = self.add_resource({"apiVersion": "v1",
-                                          "kind": "Namespace",
-                                          "metadata": {
-                                              "labels": {
-                                                  "istio-injection": "disabled"
-                                              },
-                                              "name": "istio-system"
-                                          }})
-        istio_system.rdef.populate_api(client, k8s_client)
+
+        res = self._create_resource(manifest)
+        res.rdef.populate_api(client, k8s_client)
         try:
-            istio_system.create(dry_run=dry_run)
+            res.delete(dry_run=dry_run)
+        except ApiException as e:
+            skip = False
+            if e.status == 404 and missing_ok:
+                skip = True
+            if not skip:
+                raise
+        return res
+
+    def _create_resource_internal(self, manifest, dry_run=True, exists_ok=False):
+        from kubernetes import client
+        from kubernetes.client.rest import ApiException
+
+        context = self.context
+        k8s_client = context.k8s.client
+
+        res = self._create_resource(manifest)
+        res.rdef.populate_api(client, k8s_client)
+        try:
+            res.create(dry_run=dry_run)
         except ApiException as e:
             skip = False
             if e.status == 409:
                 status = json.loads(e.body)
-                if status["reason"] == "AlreadyExists":
+                if status["reason"] == "AlreadyExists" and exists_ok:
                     skip = True
             if not skip:
                 raise
+        return res
+
+    def _install(self, operators_file, dry_run):
+        context = self.context
+        status_details = " (dry run)" if dry_run else ""
+
+        logger.info("Running Istio install%s", status_details)
+        istio_install_cmd = context.istio.stanza() + ["install", "-f", operators_file.name, "-y", "--verify"]
+        context.app.run(istio_install_cmd + (["--dry-run"] if dry_run else []),
+                        stdout_logger,
+                        stderr_logger).wait()
+
+    def _upgrade(self, operators_file, dry_run):
+        context = self.context
+        status_details = " (dry run)" if dry_run else ""
+
+        logger.info("Running Istio upgrade%s", status_details)
+        istio_upgrade_cmd = context.istio.stanza() + ["upgrade", "-f", operators_file.name, "-y", "--verify"]
+        context.app.run(istio_upgrade_cmd + (["--dry-run"] if dry_run else []),
+                        stdout_logger,
+                        stderr_logger).wait()
+
+    def _create_istio_system_ns(self, dry_run):
+        status_details = " (dry run)" if dry_run else ""
+        logger.info("Creating istio-system namespace%s", status_details)
+        self._create_resource_internal({"apiVersion": "v1",
+                                        "kind": "Namespace",
+                                        "metadata": {
+                                            "labels": {
+                                                "istio-injection": "disabled"
+                                            },
+                                            "name": "istio-system"
+                                        }
+                                        },
+                                       dry_run=dry_run,
+                                       exists_ok=True
+                                       )
+
+    def _operator_init(self, operators_file, dry_run):
+        context = self.context
+        status_details = " (dry run)" if dry_run else ""
 
         logger.info("Running Istio operator init%s", status_details)
         istio_operator_init = context.istio.stanza() + ["operator", "init", "-f", operators_file.name]
