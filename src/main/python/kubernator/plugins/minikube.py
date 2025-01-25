@@ -206,7 +206,12 @@ class MinikubePlugin(KubernatorPlugin):
         minikube = self.context.minikube
         if self.minikube_is_running():
             logger.info("Shutting down minikube profile %r...", minikube.profile)
-            self.cmd("stop", "-o", "json")
+            try:
+                self.cmd("stop", "-o", "json")
+            except CalledProcessError as e:
+                # Workaround for minikube 1.35.0 https://github.com/kubernetes/minikube/issues/20302
+                if e.returncode != 82:
+                    raise
 
     def minikube_delete(self):
         minikube = self.context.minikube
