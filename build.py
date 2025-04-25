@@ -27,7 +27,7 @@ use_plugin("python.vendorize")
 use_plugin("filter_resources")
 
 name = "kubernator"
-version = "1.0.18"
+version = "1.0.19.dev"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
@@ -50,7 +50,7 @@ default_task = ["analyze", "publish"]
 @init
 def set_properties(project):
     project.depends_on("gevent", ">=21.1.2")
-    project.depends_on("kubernetes", "~=31.0")
+    project.depends_on("kubernetes", "~=32.0")
     project.depends_on("durationpy", ">=0.7")
     project.depends_on("openapi-schema-validator", "~=0.1")
     project.depends_on("openapi-spec-validator", "~=0.3")
