@@ -39,6 +39,7 @@ from typing import Optional, Union, MutableSequence
 import requests
 import yaml
 from diff_match_patch import diff_match_patch
+from gevent import sleep
 from jinja2 import (Environment,
                     ChainableUndefined,
                     make_logging_undefined,
@@ -108,13 +109,29 @@ def _load_file(logger, path: Path, file_type: FileType, source=None) -> Iterable
 
 
 def _download_remote_file(url, file_name, cache: dict):
-    with requests.get(url, headers=cache, stream=True) as r:
-        r.raise_for_status()
-        if r.status_code != 304:
-            with open(file_name, "wb") as out:
-                for chunk in r.iter_content(chunk_size=65535):
-                    out.write(chunk)
-            return dict(r.headers)
+    retry_delay = 0
+    while True:
+        if retry_delay:
+            sleep(retry_delay)
+
+        with requests.get(url, headers=cache, stream=True) as r:
+            if r.status_code == 429:
+                if not retry_delay:
+                    retry_delay = 0.2
+                else:
+                    retry_delay *= 2.0
+                if retry_delay > 2.5:
+                    retry_delay = 2.5
+                continue
+
+            r.raise_for_status()
+            if r.status_code != 304:
+                with open(file_name, "wb") as out:
+                    for chunk in r.iter_content(chunk_size=65535):
+                        out.write(chunk)
+                return dict(r.headers)
+            else:
+                return None
 
 
 def get_app_cache_dir():
