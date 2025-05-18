@@ -20,7 +20,7 @@ import logging
 from collections.abc import Mapping
 from pathlib import Path
 
-from jsonschema import Draft7Validator, draft7_format_checker
+from jsonschema import Draft7Validator
 
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, load_file, FileType, calling_frame_source,
                             validator_with_defaults, TemplateEngine, Template)
@@ -86,7 +86,7 @@ TEMPLATE_SCHEMA = {
 
 Draft7Validator.check_schema(TEMPLATE_SCHEMA)
 TEMPLATE_VALIDATOR_CLS: type[Draft7Validator] = validator_with_defaults(Draft7Validator)
-TEMPLATE_VALIDATOR: Draft7Validator = TEMPLATE_VALIDATOR_CLS(TEMPLATE_SCHEMA, format_checker=draft7_format_checker)
+TEMPLATE_VALIDATOR: Draft7Validator = TEMPLATE_VALIDATOR_CLS(TEMPLATE_SCHEMA, format_checker=Draft7Validator.FORMAT_CHECKER)
 
 
 class TemplatePlugin(KubernatorPlugin):

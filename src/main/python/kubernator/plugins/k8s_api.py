@@ -29,11 +29,10 @@ from typing import Union, Optional
 
 import yaml
 from jsonschema._format import FormatChecker
-from jsonschema._types import int_types, str_types
-from jsonschema._validators import required
+from jsonschema._keywords import required
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import extend, Draft7Validator, RefResolver
-from openapi_schema_validator import OAS30Validator
+from openapi_schema_validator import OAS31Validator
 
 from kubernator.api import load_file, FileType, load_remote_file, calling_frame_source
 
@@ -89,11 +88,11 @@ def is_integer(instance):
     # bool inherits from int, so ensure bools aren't reported as ints
     if isinstance(instance, bool):
         return False
-    return isinstance(instance, int_types)
+    return isinstance(instance, int)
 
 
 def is_string(instance):
-    return isinstance(instance, str_types)
+    return isinstance(instance, str)
 
 
 def type_validator(validator, data_type, instance, schema):
@@ -107,7 +106,7 @@ def type_validator(validator, data_type, instance, schema):
         yield ValidationError("%r is not of type %s" % (instance, data_type))
 
 
-K8SValidator = extend(OAS30Validator, validators={
+K8SValidator = extend(OAS31Validator, validators={
     "type": type_validator,
     "required": required
 })

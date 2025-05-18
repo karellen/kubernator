@@ -27,7 +27,7 @@ from shutil import which, copy
 from typing import Sequence
 
 import yaml
-from jsonschema import Draft7Validator, draft7_format_checker
+from jsonschema import Draft7Validator
 
 from kubernator.api import (KubernatorPlugin, Globs, StripNL,
                             scan_dir,
@@ -90,7 +90,7 @@ HELM_SCHEMA = {
 
 Draft7Validator.check_schema(HELM_SCHEMA)
 HELM_VALIDATOR_CLS = validator_with_defaults(Draft7Validator)
-HELM_VALIDATOR = HELM_VALIDATOR_CLS(HELM_SCHEMA, format_checker=draft7_format_checker)
+HELM_VALIDATOR = HELM_VALIDATOR_CLS(HELM_SCHEMA, format_checker=Draft7Validator.FORMAT_CHECKER)
 
 
 class HelmPlugin(KubernatorPlugin):
