@@ -85,7 +85,7 @@ HELM_SCHEMA = {
         }
     },
     "type": "object",
-    "required": ["repository", "chart", "version", "name", "namespace"]
+    "required": ["chart", "name", "namespace"]
 }
 
 Draft7Validator.check_schema(HELM_SCHEMA)
@@ -130,7 +130,7 @@ class HelmPlugin(KubernatorPlugin):
             helm_tar = tarfile.open(helm_file_dl)
             helm_tar.extractall(self.helm_dir.name)
 
-            copy(Path(self.helm_dir.name)/f"{get_golang_os()}-{get_golang_machine()}"/"helm", helm_file)
+            copy(Path(self.helm_dir.name) / f"{get_golang_os()}-{get_golang_machine()}" / "helm", helm_file)
 
             os.chmod(helm_file, 0o500)
             prepend_os_path(self.helm_dir.name)
@@ -215,17 +215,34 @@ class HelmPlugin(KubernatorPlugin):
 
         return repository_hash
 
-    def _internal_add_helm(self, source, *, repository, chart, version, name, namespace, include_crds,
-                           values=None, values_file=None):
+    def _internal_add_helm(self, source, *, chart, name, namespace, include_crds,
+                           values=None, values_file=None, repository=None, version=None):
         if values and values_file:
             raise RuntimeError(f"In {source} either values or values file may be specified, but not both")
+
+        if (repository and chart and chart.startswith("oci://") or
+                not repository and chart and not chart.startswith("oci://")):
+            raise RuntimeError(
+                f"In {source} either repository must be specified or OCI-chart must be used, but not both")
+
+        if not version and repository:
+            raise RuntimeError(f"In {source} version must be specified unless OCI-chart is used")
 
         if values_file:
             values_file = Path(values_file)
             if not values_file.is_absolute():
                 values_file = self.context.app.cwd / values_file
 
-        repository_hash = self._add_repository(repository)
+        version_spec = []
+        if repository:
+            repository_hash = self._add_repository(repository)
+            chart_name = f"{repository_hash}/{chart}"
+        else:
+            chart_name = chart
+
+        if version:
+            version_spec = ["--version", version]
+
         stdin = DEVNULL
 
         if values:
@@ -237,11 +254,11 @@ class HelmPlugin(KubernatorPlugin):
         resources = self.context.app.run_capturing_out(self.stanza() +
                                                        ["template",
                                                         name,
-                                                        f"{repository_hash}/{chart}",
-                                                        "--version", version,
+                                                        chart_name,
                                                         "-n", namespace,
                                                         "-a", ",".join(self.context.k8s.get_api_versions())
                                                         ] +
+                                                       version_spec +
                                                        (["--include-crds"] if include_crds else []) +
                                                        (["-f", values_file] if values_file else []) +
                                                        (["-f", "-"] if values else []),

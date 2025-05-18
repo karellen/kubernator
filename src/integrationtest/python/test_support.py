@@ -83,3 +83,13 @@ class IntegrationTestSupport(unittest.TestCase):
             sys.path.extend(old_sys_path)
 
             chdir(old_cwd)
+
+            from logging import shutdown, _handlerList, root
+
+            shutdown()
+
+            import gc
+            gc.collect()
+            root.handlers.clear()
+            _handlerList.clear()
+            gc.collect()
