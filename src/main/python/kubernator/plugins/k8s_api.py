@@ -31,7 +31,7 @@ import yaml
 from jsonschema._format import FormatChecker
 from jsonschema._keywords import required
 from jsonschema.exceptions import ValidationError
-from jsonschema.validators import extend, Draft7Validator, RefResolver
+from jsonschema.validators import extend, Draft7Validator
 from openapi_schema_validator import OAS31Validator
 
 from kubernator.api import load_file, FileType, load_remote_file, calling_frame_source
@@ -145,10 +145,6 @@ def check_byte(value):
 @k8s_format_checker.checks("int-or-string")
 def check_int_or_string(value):
     return check_int32(value) if is_integer(value) else is_string(value)
-
-
-# def make_api_version(group, version):
-#    return f"{group}/{version}" if group else version
 
 
 def to_group_and_version(api_version):
@@ -662,10 +658,8 @@ class K8SResourcePluginMixin:
                 yield error
             else:
                 rdef = error
-                # schema = ChainMap(manifest, self.resource_definitions_schema)
                 k8s_validator = K8SValidator(rdef.schema,
-                                             format_checker=k8s_format_checker,
-                                             resolver=RefResolver.from_schema(self.resource_definitions_schema))
+                                             format_checker=k8s_format_checker)
                 yield from k8s_validator.iter_errors(manifest)
 
     def _get_manifest_rdef(self, manifest):
@@ -743,6 +737,8 @@ class K8SResourcePluginMixin:
                 rdef_paths[path] = actions
 
         for k, schema in k8s_def["definitions"].items():
+            # This short-circuits the resolution of the references to the top of the document
+            schema["definitions"] = k8s_def["definitions"]
             for key in k8s_resource_def_key(schema):
                 for rdef in K8SResourceDef.from_manifest(key, schema, self.resource_paths):
                     self.resource_definitions[key] = rdef
