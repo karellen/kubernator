@@ -62,7 +62,6 @@ def set_properties(project):
     project.depends_on("jinja2", "~=3.1")
     project.depends_on("coloredlogs", "~=15.0")
     project.depends_on("jsonschema", "~=4.23")
-    project.depends_on("referencing", "~=0.36.2")
     project.depends_on("diff-match-patch", ">2023.0")
 
     project.set_property("coverage_break_build", False)
