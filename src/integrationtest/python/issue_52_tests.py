@@ -28,8 +28,8 @@ class Issue52Test(IntegrationTestSupport):
     def test_issue_52(self):
         test_dir = Path(__file__).parent / "issue_52"
 
-        for k8s_version, istio_version in ((self.K8S_TEST_VERSIONS[-3], "1.20.4"),
-                                           (self.K8S_TEST_VERSIONS[-1], "1.22.0")):
+        for k8s_version, istio_version in ((self.K8S_TEST_VERSIONS[-6], "1.20.4"),
+                                           (self.K8S_TEST_VERSIONS[-1], "1.27.1")):
             with self.subTest(k8s_version=k8s_version, istio_version=istio_version):
                 os.environ["K8S_VERSION"] = k8s_version
                 os.environ["ISTIO_VERSION"] = istio_version

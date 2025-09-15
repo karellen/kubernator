@@ -35,6 +35,8 @@ proc_logger = logger.getChild("proc")
 stdout_logger = StripNL(proc_logger.info)
 stderr_logger = StripNL(proc_logger.warning)
 
+MINIKUBE_MAX_VERSION_LEGACY = "1.36.0"
+
 
 class MinikubePlugin(KubernatorPlugin):
     logger = logger
@@ -99,9 +101,17 @@ class MinikubePlugin(KubernatorPlugin):
             logger.critical(msg)
             raise RuntimeError(msg)
 
+        k8s_version_tuple = tuple(map(int, k8s_version.split(".")))
+
         if not minikube_version:
             minikube_version = self.get_latest_minikube_version()
             logger.info("No minikube version is specified, latest is %s", minikube_version)
+            if k8s_version_tuple < (1, 28, 0):
+                logger.info("While latest minikube version is %s, "
+                            "the requested K8S version %s requires %s or earlier - choosing %s",
+                            minikube_version, k8s_version, MINIKUBE_MAX_VERSION_LEGACY,
+                            MINIKUBE_MAX_VERSION_LEGACY)
+                minikube_version = MINIKUBE_MAX_VERSION_LEGACY
 
         minikube_dl_file, _ = context.app.download_remote_file(logger,
                                                                f"https://github.com/kubernetes/minikube/releases"

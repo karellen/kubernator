@@ -40,7 +40,7 @@ urls = {
     "Source Code": "https://github.com/karellen/kubernator/",
     "Documentation": "https://github.com/karellen/kubernator/"
 }
-license = "Apache License, Version 2.0"
+license = "Apache-2.0"
 
 requires_python = ">=3.9"
 
@@ -56,7 +56,7 @@ def set_properties(project):
     project.depends_on("openapi-spec-validator", "~=0.3")
     project.depends_on("json-log-formatter", "~=0.3")
     project.depends_on("platformdirs", "~=4.2")
-    project.depends_on("requests", "<=2.31.0")
+    project.depends_on("requests", ">=2.31.0")
     project.depends_on("jsonpatch", "~=1.33")
     project.depends_on("jsonpath-ng", "~=1.7.0")
     project.depends_on("jinja2", "~=3.1")
@@ -83,12 +83,12 @@ def set_properties(project):
                                                       "kOps", "terraform", "tf", "AWS"])
 
     project.set_property("distutils_classifiers", [
-        "License :: OSI Approved :: Apache Software License",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
         "Operating System :: MacOS :: MacOS X",
         "Operating System :: POSIX",
         "Operating System :: POSIX :: Linux",
