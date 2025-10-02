@@ -21,6 +21,7 @@ jobs:
         os:
           - ubuntu-latest
         python-version:
+          - '3.14-dev'
           - '3.13'
           - '3.12'
           - '3.11'
@@ -30,7 +31,7 @@ jobs:
         #  - os: macos-12
         #    python-version: '3.11'
     env:
-      DEPLOY_PYTHONS: "3.12"
+      DEPLOY_PYTHONS: "3.13"
       DEPLOY_OSES: "Linux"
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TWINE_USERNAME: __token__

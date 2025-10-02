@@ -35,7 +35,7 @@ import kubernator
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, PropertyDict, config_as_dict, config_parent,
                             download_remote_file, load_remote_file, Repository, StripNL, jp, get_app_cache_dir,
                             get_cache_dir, install_python_k8s_client)
-from kubernator.proc import run, run_capturing_out
+from kubernator.proc import run, run_capturing_out, run_pass_through_capturing
 
 TRACE = 5
 
@@ -215,7 +215,7 @@ class App(KubernatorPlugin):
                 self.context = self._top_dir_context
                 context = self.context
                 self._run_handlers(KubernatorPlugin.handle_shutdown, True, context, None)
-        except: # noqa E722
+        except:  # noqa E722
             raise
         else:
             self.context = self._top_dir_context
@@ -348,6 +348,7 @@ class App(KubernatorPlugin):
                                    jp=jp,
                                    run=self._run,
                                    run_capturing_out=self._run_capturing_out,
+                                   run_passthrough_capturing=self._run_passthrough_capturing,
                                    repository=self.repository,
                                    StripNL=StripNL,
                                    default_includes=Globs(["*"], True),
@@ -465,6 +466,9 @@ class App(KubernatorPlugin):
     def _run_capturing_out(self, *args, **kwargs):
         return run_capturing_out(*args, **kwargs)
 
+    def _run_passthrough_capturing(self, *args, **kwargs):
+        return run_pass_through_capturing(*args, **kwargs)
+
     def __repr__(self):
         return "Kubernator"
 
@@ -493,7 +497,7 @@ def pre_cache_k8s_clients(*versions, disable_patching=False):
     for v in versions:
         logger.info("Caching K8S client library ~=v%s.0%s...", v,
                     " (no patches)" if disable_patching else "")
-        install_python_k8s_client(run, v, logger, stdout_logger, stderr_logger, disable_patching)
+        install_python_k8s_client(run_pass_through_capturing, v, logger, stdout_logger, stderr_logger, disable_patching)
 
 
 def main():

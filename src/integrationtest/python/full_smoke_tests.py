@@ -28,10 +28,10 @@ class FullSmokeTest(IntegrationTestSupport):
     def test_full_smoke(self):
         test_dir = Path(__file__).parent / "full_smoke"
 
-        for k8s_version, istio_version in ((self.K8S_TEST_VERSIONS[-4], "1.23.6"),
-                                           (self.K8S_TEST_VERSIONS[-3], "1.24.6"),
-                                           (self.K8S_TEST_VERSIONS[-2], "1.25.3"),
-                                           (self.K8S_TEST_VERSIONS[-1], "1.26.0")):
+        for k8s_version, istio_version in ((self.K8S_TEST_VERSIONS[-4], "1.24.6"),
+                                           (self.K8S_TEST_VERSIONS[-3], "1.25.5"),
+                                           (self.K8S_TEST_VERSIONS[-2], "1.26.4"),
+                                           (self.K8S_TEST_VERSIONS[-1], "1.27.1"),):
             with self.subTest(k8s_version=k8s_version, istio_version=istio_version):
                 os.environ["K8S_VERSION"] = k8s_version
                 os.environ["ISTIO_VERSION"] = istio_version

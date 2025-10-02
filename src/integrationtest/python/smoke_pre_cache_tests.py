@@ -25,10 +25,10 @@ class PreCacheSmokeTest(IntegrationTestSupport):
         self.run_module_test("kubernator", "--clear-k8s-cache")
 
     def test_precache(self):
-        for k8s_version in range(19, 29):
+        for k8s_version in range(19, 35):
             for disable_patches in (True, False, True):
                 with self.subTest(k8s_version=k8s_version, disable_patches=disable_patches):
-                    args = ["kubernator", "--pre-cache-k8s-client", str(k8s_version)]
+                    args = ["kubernator", "-v", "TRACE", "--pre-cache-k8s-client", str(k8s_version)]
                     if disable_patches:
                         args.append("--pre-cache-k8s-client-no-patch")
                     self.run_module_test(*args)

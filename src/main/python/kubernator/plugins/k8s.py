@@ -164,7 +164,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         logger.info("Using Kubernetes client version =~%s.0 for server version %s",
                     server_minor, ".".join(k8s.server_version))
-        pkg_dir = install_python_k8s_client(self.context.app.run, server_minor, logger,
+        pkg_dir = install_python_k8s_client(self.context.app.run_passthrough_capturing, server_minor, logger,
                                             stdout_logger, stderr_logger, k8s.disable_client_patches)
 
         modules_to_delete = []

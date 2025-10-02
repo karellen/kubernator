@@ -108,7 +108,7 @@ class ProcessRunner:
             raise RuntimeError("not available")
         return self._proc.stdin
 
-    def wait(self, fail=True, timeout=None, _out_func=None):
+    def wait(self, fail=True, timeout=None, _out_func=None, _stderr_func=None):
         with Timeout(timeout, TimeoutExpired):
             retcode = self._proc.wait()
             if self._stdin_writer:
@@ -119,9 +119,12 @@ class ProcessRunner:
                 self._stderr_reader.join()
         if fail and retcode:
             output = None
+            stderr = None
             if _out_func:
                 output = _out_func()
-            raise CalledProcessError(retcode, self._safe_args, output=output)
+            if _stderr_func:
+                stderr = _stderr_func()
+            raise CalledProcessError(retcode, self._safe_args, output=output, stderr=stderr)
         return retcode
 
     def terminate(self):
@@ -132,6 +135,25 @@ class ProcessRunner:
 
 
 run = ProcessRunner
+
+
+def run_pass_through_capturing(args, stdout_logger, stderr_logger, stdin=DEVNULL, *, safe_args=None,
+                               universal_newlines=True, **kwargs):
+    out = StringIO(trimmed=False) if universal_newlines else BytesIO()
+    err = StringIO(trimmed=False) if universal_newlines else BytesIO()
+
+    def write_out(data):
+        out.write(data)
+        stdout_logger(data)
+
+    def write_err(data):
+        err.write(data)
+        stderr_logger(data)
+
+    proc = run(args, write_out, write_err, stdin, safe_args=safe_args, universal_newlines=universal_newlines,
+               **kwargs)
+    proc.wait(_out_func=lambda: out.getvalue(), _stderr_func=lambda: err.getvalue())
+    return out.getvalue(), err.getvalue()
 
 
 def run_capturing_out(args, stderr_logger, stdin=DEVNULL, *, safe_args=None, universal_newlines=True, **kwargs):

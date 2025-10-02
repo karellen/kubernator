@@ -768,7 +768,8 @@ class KubernatorPlugin:
         pass
 
 
-def install_python_k8s_client(run, package_major, logger, logger_stdout, logger_stderr, disable_patching):
+def install_python_k8s_client(run, package_major, logger, logger_stdout, logger_stderr, disable_patching,
+                              fallback=False):
     cache_dir = get_cache_dir("python")
     package_major_dir = cache_dir / str(package_major)
     package_major_dir_str = str(package_major_dir)
@@ -780,14 +781,43 @@ def install_python_k8s_client(run, package_major, logger, logger_stdout, logger_
                     str(package_major), package_major_dir)
         rmtree(package_major_dir)
 
-    if not package_major_dir.exists():
+    if not package_major_dir.exists() or not len(os.listdir(package_major_dir)):
         package_major_dir.mkdir(parents=True, exist_ok=True)
-        run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-input",
-             "--root-user-action=ignore", "--break-system-packages", "--disable-pip-version-check",
-             "--target", package_major_dir_str, f"kubernetes>={package_major!s}dev0,<{int(package_major) + 1!s}"],
-            logger_stdout, logger_stderr).wait()
+        try:
+            run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-input",
+                 "--root-user-action=ignore", "--break-system-packages", "--disable-pip-version-check",
+                 "--target", package_major_dir_str, f"kubernetes>={package_major!s}dev0,<{int(package_major) + 1!s}"],
+                logger_stdout, logger_stderr)
+        except CalledProcessError as e:
+            if not fallback and "No matching distribution found for" in e.stderr:
+                logger.warning("Kubernetes Client %s (%s) failed to install because the version wasn't found. "
+                               "Falling back to a client of the previous version - %s",
+                               str(package_major), package_major_dir, int(package_major) - 1)
+                return install_python_k8s_client(run,
+                                                 int(package_major) - 1,
+                                                 logger,
+                                                 logger_stdout,
+                                                 logger_stderr,
+                                                 disable_patching,
+                                                 fallback=True)
+            else:
+                raise
 
     if not patch_indicator.exists() and not disable_patching:
+        if not fallback and not len(os.listdir(package_major_dir)):
+            # Directory is empty
+            logger.warning("Kubernetes Client %s (%s) directory is empty - the client was not installed. "
+                           "Falling back to a client of the previous version - %s",
+                           str(package_major), package_major_dir, int(package_major) - 1)
+
+            return install_python_k8s_client(run,
+                                             int(package_major) - 1,
+                                             logger,
+                                             logger_stdout,
+                                             logger_stderr,
+                                             disable_patching,
+                                             fallback=True)
+
         for patch_text, target_file, skip_if_found, min_version, max_version, name in (
                 URLLIB_HEADERS_PATCH, CUSTOM_OBJECT_PATCH_23, CUSTOM_OBJECT_PATCH_25):
             patch_target = package_major_dir / target_file
