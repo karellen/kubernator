@@ -38,7 +38,8 @@ from kubernator.api import (KubernatorPlugin,
                             FileType,
                             load_remote_file,
                             StripNL,
-                            install_python_k8s_client)
+                            install_python_k8s_client,
+                            TemplateEngine)
 from kubernator.merge import extract_merge_instructions, apply_merge_instructions
 from kubernator.plugins.k8s_api import (K8SResourcePluginMixin,
                                         K8SResource,
@@ -95,6 +96,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         self._transformers = []
         self._validators = []
         self._summary = 0, 0, 0
+        self._template_engine = TemplateEngine(logger)
 
     def set_context(self, context):
         self.context = context
@@ -239,7 +241,10 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             display_p = context.app.display_path(p)
             logger.debug("Adding Kubernetes manifest from %s", display_p)
 
-            manifests = load_file(logger, p, FileType.YAML, display_p)
+            manifests = load_file(logger, p, FileType.YAML, display_p,
+                                  self._template_engine,
+                                  {"ktor": context}
+                                  )
 
             for manifest in manifests:
                 if manifest:
