@@ -20,6 +20,7 @@ import fnmatch
 import json
 import logging
 import os
+import io
 import platform
 import re
 import sys
@@ -56,6 +57,53 @@ from kubernator._k8s_client_patches import (URLLIB_HEADERS_PATCH,
 _CACHE_HEADER_TRANSLATION = {"etag": "if-none-match",
                              "last-modified": "if-modified-since"}
 _CACHE_HEADERS = ("etag", "last-modified")
+
+
+class TemplateEngine:
+    VARIABLE_START_STRING = "{${"
+    VARIABLE_END_STRING = "}$}"
+
+    def __init__(self, logger):
+        self.template_failures = 0
+        self.templates = {}
+
+        class CollectingUndefined(ChainableUndefined):
+            __slots__ = ()
+
+            def __str__(self):
+                self.template_failures += 1
+                return super().__str__()
+
+        logging_undefined = make_logging_undefined(
+            logger=logger,
+            base=CollectingUndefined
+        )
+
+        @pass_context
+        def variable_finalizer(ctx, value):
+            normalized_value = str(value)
+            if self.VARIABLE_START_STRING in normalized_value and self.VARIABLE_END_STRING in normalized_value:
+                value_template_content = sys.intern(normalized_value)
+                env: Environment = ctx.environment
+                value_template = self.templates.get(value_template_content)
+                if not value_template:
+                    value_template = env.from_string(value_template_content, env.globals)
+                    self.templates[value_template_content] = value_template
+                return value_template.render(ctx.parent)
+
+            return normalized_value
+
+        self.env = Environment(variable_start_string=self.VARIABLE_START_STRING,
+                               variable_end_string=self.VARIABLE_END_STRING,
+                               autoescape=False,
+                               finalize=variable_finalizer,
+                               undefined=logging_undefined)
+
+    def from_string(self, template):
+        return self.env.from_string(template)
+
+    def failures(self):
+        return self.template_failures
 
 
 def calling_frame_source(depth=2):
@@ -96,9 +144,15 @@ class FileType(Enum):
         self.func = func
 
 
-def _load_file(logger, path: Path, file_type: FileType, source=None) -> Iterable[dict]:
-    with open(path, "rb") as f:
+def _load_file(logger, path: Path, file_type: FileType, source=None,
+               template_engine: Optional[TemplateEngine] = None,
+               template_context: Optional[dict] = None) -> Iterable[dict]:
+    with open(path, "rb" if not template_engine else "rt") as f:
         try:
+            if template_engine:
+                raw_data = template_engine.from_string(f.read()).render(template_context)
+                f.close()
+                f = io.StringIO(raw_data)
             data = file_type.func(f)
             if isinstance(data, GeneratorType):
                 data = list(data)
@@ -191,9 +245,12 @@ def load_remote_file(logger, url, file_type: FileType, category: str = "k8s", su
     return _load_file(logger, file_name, file_type, url)
 
 
-def load_file(logger, path: Path, file_type: FileType, source=None) -> Iterable[dict]:
+def load_file(logger, path: Path, file_type: FileType, source=None,
+              template_engine: Optional[TemplateEngine] = None,
+              template_context: Optional[dict] = None) -> Iterable[dict]:
     logger.debug("Loading %s using %s", source or path, file_type.name)
-    return _load_file(logger, path, file_type)
+    return _load_file(logger, path, file_type,
+                      source, template_engine, template_context)
 
 
 def validator_with_defaults(validator_class):
@@ -511,53 +568,6 @@ class Globs(MutableSet[Union[str, re.Pattern]]):
 
     def __repr__(self):
         return f"Globs[{self._list}]"
-
-
-class TemplateEngine:
-    VARIABLE_START_STRING = "{${"
-    VARIABLE_END_STRING = "}$}"
-
-    def __init__(self, logger):
-        self.template_failures = 0
-        self.templates = {}
-
-        class CollectingUndefined(ChainableUndefined):
-            __slots__ = ()
-
-            def __str__(self):
-                self.template_failures += 1
-                return super().__str__()
-
-        logging_undefined = make_logging_undefined(
-            logger=logger,
-            base=CollectingUndefined
-        )
-
-        @pass_context
-        def variable_finalizer(ctx, value):
-            normalized_value = str(value)
-            if self.VARIABLE_START_STRING in normalized_value and self.VARIABLE_END_STRING in normalized_value:
-                value_template_content = sys.intern(normalized_value)
-                env: Environment = ctx.environment
-                value_template = self.templates.get(value_template_content)
-                if not value_template:
-                    value_template = env.from_string(value_template_content, env.globals)
-                    self.templates[value_template_content] = value_template
-                return value_template.render(ctx.parent)
-
-            return normalized_value
-
-        self.env = Environment(variable_start_string=self.VARIABLE_START_STRING,
-                               variable_end_string=self.VARIABLE_END_STRING,
-                               autoescape=False,
-                               finalize=variable_finalizer,
-                               undefined=logging_undefined)
-
-    def from_string(self, template):
-        return self.env.from_string(template)
-
-    def failures(self):
-        return self.template_failures
 
 
 class Template:

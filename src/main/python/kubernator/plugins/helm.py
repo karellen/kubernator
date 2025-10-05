@@ -37,7 +37,7 @@ from kubernator.api import (KubernatorPlugin, Globs, StripNL,
                             validator_with_defaults,
                             get_golang_os,
                             get_golang_machine,
-                            prepend_os_path
+                            prepend_os_path, TemplateEngine
                             )
 from kubernator.plugins.k8s_api import K8SResource
 from kubernator.proc import DEVNULL
@@ -102,6 +102,7 @@ class HelmPlugin(KubernatorPlugin):
         self.context = None
         self.repositories = set()
         self.helm_dir = None
+        self.template_engine = TemplateEngine(logger)
 
     def set_context(self, context):
         self.context = context
@@ -180,7 +181,9 @@ class HelmPlugin(KubernatorPlugin):
             display_p = context.app.display_path(p)
             logger.debug("Adding Helm template from %s", display_p)
 
-            helm_templates = load_file(logger, p, FileType.YAML, display_p)
+            helm_templates = load_file(logger, p, FileType.YAML, display_p,
+                                       self.template_engine,
+                                       {"ktor": context})
 
             for helm_template in helm_templates:
                 self._add_helm(helm_template, display_p)
@@ -232,6 +235,17 @@ class HelmPlugin(KubernatorPlugin):
             values_file = Path(values_file)
             if not values_file.is_absolute():
                 values_file = self.context.app.cwd / values_file
+            values = list(load_file(logger, values_file, FileType.YAML,
+                                    template_engine=self.template_engine,
+                                    template_context={"ktor": self.context,
+                                                      "helm": {"chart": chart,
+                                                               "name": name,
+                                                               "namespace": namespace,
+                                                               "include_crds": include_crds,
+                                                               "repository": repository,
+                                                               "version": version,
+                                                               }}))
+            values = values[0] if values else {}
 
         version_spec = []
         if repository:
@@ -260,8 +274,7 @@ class HelmPlugin(KubernatorPlugin):
                                                         ] +
                                                        version_spec +
                                                        (["--include-crds"] if include_crds else []) +
-                                                       (["-f", values_file] if values_file else []) +
-                                                       (["-f", "-"] if values else []),
+                                                       ["-f", "-"],
                                                        stderr_logger,
                                                        stdin=stdin,
                                                        )

@@ -30,7 +30,7 @@ from kubernator.api import (KubernatorPlugin, scan_dir,
                             io_StringIO,
                             TemplateEngine,
                             StripNL,
-                            Globs)
+                            Globs, load_file)
 from kubernator.plugins.k8s_api import K8SResourcePluginMixin
 from kubernator.proc import CalledProcessError
 
@@ -136,10 +136,11 @@ class KopsPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             display_p = context.app.display_path(p)
             logger.debug("Adding Kops resources from %s", display_p)
 
-            with open(p, "rt") as file:
-                template = self.template_engine.from_string(file.read())
+            manifests = load_file(logger, p, FileType.YAML, display_p,
+                                  self.template_engine,
+                                  {"ktor": context})
 
-            self.add_resources(template.render({"ktor": context}), display_p)
+            self.add_resources(manifests, display_p)
 
     def update(self):
         context = self.context
