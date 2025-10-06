@@ -27,7 +27,7 @@ use_plugin("python.vendorize")
 use_plugin("filter_resources")
 
 name = "kubernator"
-version = "1.0.22"
+version = "1.0.23.dev"
 
 summary = "Kubernator is the a pluggable framework for K8S provisioning"
 authors = [Author("Express Systems USA, Inc.", "")]
