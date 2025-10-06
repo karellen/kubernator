@@ -91,7 +91,7 @@ class MinikubePlugin(KubernatorPlugin):
 
     def register(self, minikube_version=None, profile="default", k8s_version=None,
                  keep_running=False, start_fresh=False,
-                 nodes=1, driver=None, cpus="no-limit", extra_args=None):
+                 nodes=1, driver=None, cpus="no-limit", extra_args=None, extra_addons=None):
         context = self.context
 
         context.app.register_plugin("kubeconfig")
@@ -166,12 +166,14 @@ class MinikubePlugin(KubernatorPlugin):
                                         minikube_file=str(minikube_file),
                                         profile=profile,
                                         k8s_version=k8s_version,
+                                        k8s_version_tuple=k8s_version_tuple,
                                         start_fresh=start_fresh,
                                         keep_running=keep_running,
                                         nodes=nodes,
                                         driver=driver,
                                         cpus=cpus,
                                         extra_args=extra_args or [],
+                                        extra_addons=extra_addons or [],
                                         kubeconfig=str(self.kubeconfig_dir / "config"),
                                         cmd=self.cmd,
                                         cmd_out=self.cmd_out
@@ -201,6 +203,16 @@ class MinikubePlugin(KubernatorPlugin):
                     "--kubernetes-version", str(minikube.k8s_version),
                     "--wait", "apiserver",
                     "--nodes", str(minikube.nodes)]
+
+            addons = []
+            if minikube.k8s_version_tuple >= (1, 28):
+                addons += ["volumesnapshots", "csi-hostpath-driver"]
+
+            if minikube.extra_addons:
+                addons += minikube.extra_addons
+
+            if addons:
+                args += ["--addons", ",".join(addons)]
 
             if minikube.driver == "docker":
                 args.extend(["--cpus", str(minikube.cpus)])
