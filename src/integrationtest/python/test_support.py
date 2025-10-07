@@ -65,6 +65,7 @@ class IntegrationTestSupport(unittest.TestCase):
         old_sys_path = list(sys.path)
         old_cwd = getcwd()
         # chdir(self.tmp_directory)
+
         try:
             return run_module(module, run_name="__main__")
         except SystemExit as e:
