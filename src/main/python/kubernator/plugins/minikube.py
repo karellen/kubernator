@@ -15,7 +15,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 #
-
+import json
 import logging
 import os
 import tempfile
@@ -223,6 +223,24 @@ class MinikubePlugin(KubernatorPlugin):
 
         logger.info("Updating minikube profile %r context", minikube.profile)
         self.cmd("update-context")
+
+        if minikube.k8s_version_tuple >= (1, 28):
+            logger.info("Disabling old storage addons")
+            self.cmd("addons", "disable", "storage-provisioner")
+            self.cmd("addons", "disable", "default-storageclass")
+
+        logger.info("Running initialization scripts for profile %r", minikube.profile)
+        self.context.app.register_plugin("kubectl", version=minikube.k8s_version)
+        if minikube.k8s_version_tuple >= (1, 28):
+            storage_class = self.context.kubectl.get("storageclass", "csi-hostpath-sc")
+            self.context.kubectl.run("delete", "storageclass", "csi-hostpath-sc")
+            storage_class["metadata"]["annotations"]["storageclass.kubernetes.io/is-default-class"] = "true"
+            storage_class["volumeBindingMode"] = "WaitForFirstConsumer"
+
+            def write_stdin():
+                return json.dumps(storage_class)
+
+            self.context.kubectl.run("create", "-f", "-", stdin=write_stdin)
 
     def minikube_stop(self):
         minikube = self.context.minikube

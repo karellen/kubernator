@@ -16,12 +16,15 @@
 #   limitations under the License.
 #
 
+import io
 import json
 import logging
 import os
 import tempfile
 from pathlib import Path
 from shutil import which, copy
+
+import yaml
 
 from kubernator.api import (KubernatorPlugin,
                             prepend_os_path,
@@ -89,15 +92,44 @@ class KubectlPlugin(KubernatorPlugin):
         context.globals.kubectl = dict(version=version,
                                        kubectl_file=kubectl_file,
                                        stanza=self.stanza,
-                                       test=self.test_kubectl
+                                       test=self.test_kubectl,
+                                       run=self.run,
+                                       run_capturing=self.run_capturing,
+                                       get=self.get,
                                        )
 
         context.globals.kubectl.version = context.kubectl.test()
 
+    def run_capturing(self, *args, **kwargs):
+        return self.context.app.run_capturing_out(self.stanza() +
+                                                  list(args),
+                                                  stderr_logger,
+                                                  **kwargs
+                                                  )
+
+    def run(self, *args, **kwargs):
+        self.context.app.run(self.stanza() +
+                             list(args),
+                             stdout_logger,
+                             stderr_logger,
+                             **kwargs
+                             ).wait()
+
+    def get(self, resource_type, resource_name, namespace=None):
+        args = ["get", resource_type, resource_name]
+        if namespace:
+            args += ["-n", namespace]
+        args += ["-o", "yaml"]
+
+        res = list(yaml.safe_load_all(io.StringIO(self.context.kubectl.run_capturing(*args))))
+        if len(res):
+            if len(res) > 1:
+                return res
+            return res[0]
+        return None
+
     def test_kubectl(self):
-        version_out: str = self.context.app.run_capturing_out(self.stanza() +
-                                                              ["version", "--client=true", "-o", "json"],
-                                                              stderr_logger)
+        version_out: str = self.run_capturing("version", "--client=true", "-o", "json")
 
         version_out_js = json.loads(version_out)
         kubectl_version = version_out_js["clientVersion"]["gitVersion"][1:]
