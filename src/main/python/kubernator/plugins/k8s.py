@@ -39,7 +39,8 @@ from kubernator.api import (KubernatorPlugin,
                             load_remote_file,
                             StripNL,
                             install_python_k8s_client,
-                            TemplateEngine)
+                            TemplateEngine,
+                            sleep)
 from kubernator.merge import extract_merge_instructions, apply_merge_instructions
 from kubernator.plugins.k8s_api import (K8SResourcePluginMixin,
                                         K8SResource,
@@ -120,6 +121,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                                       ("apps", "StatefulSet"): K8SPropagationPolicy.ORPHAN,
                                                       ("apps", "Deployment"): K8SPropagationPolicy.ORPHAN,
                                                       ("storage.k8s.io", "StorageClass"): K8SPropagationPolicy.ORPHAN,
+                                                      (None, "Pod"): K8SPropagationPolicy.BACKGROUND,
                                                       },
                                    default_includes=Globs(["*.yaml", "*.yml"], True),
                                    default_excludes=Globs([".*"], True),
@@ -137,6 +139,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                    field_validation=field_validation,
                                    field_validation_warn_fatal=field_validation_warn_fatal,
                                    field_validation_warnings=0,
+                                   conflict_retry_delay=0.3,
                                    _k8s=self,
                                    )
         context.k8s = dict(default_includes=Globs(context.globals.k8s.default_includes),
@@ -425,18 +428,26 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                      resource, resource.source, status["message"])
                         raise e from None
 
-        def create(exists_ok=False):
+        def create(exists_ok=False, wait_for_delete=False):
             logger.info("Creating resource %s%s%s", resource, status_msg,
                         " (ignoring existing)" if exists_ok else "")
-            try:
-                create_func()
-            except ApiException as e:
-                if exists_ok:
-                    if e.status == 409:
-                        status = json.loads(e.body)
-                        if status["reason"] == "AlreadyExists":
-                            return
-                raise
+            while True:
+                try:
+                    create_func()
+                    return
+                except ApiException as e:
+                    if exists_ok or wait_for_delete:
+                        if e.status == 409:
+                            status = json.loads(e.body)
+                            if status["reason"] == "AlreadyExists":
+                                if wait_for_delete:
+                                    sleep(self.context.k8s.conflict_retry_delay)
+                                    logger.info("Retry creating resource %s%s%s", resource, status_msg,
+                                                " (ignoring existing)" if exists_ok else "")
+                                    continue
+                                else:
+                                    return
+                    raise
 
         merge_instrs, normalized_manifest = extract_merge_instructions(resource.manifest, resource)
         if merge_instrs:
@@ -471,7 +482,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 if e.status == 422:
                     status = json.loads(e.body)
                     details = status["details"]
-                    immutable_key = details["group"], details["kind"]
+                    immutable_key = details.get("group"), details["kind"]
 
                     try:
                         propagation_policy = self.context.k8s.immutable_changes[immutable_key]
@@ -484,13 +495,15 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                     "field is immutable" in cause["message"]
                                     or
                                     cause["reason"] == "FieldValueForbidden" and
-                                    "Forbidden: updates to" in cause["message"]
+                                    ("Forbidden: updates to" in cause["message"]
+                                     or
+                                     "Forbidden: pod updates" in cause["message"])
                             ):
                                 logger.info("Deleting resource %s (cascade %s)%s", resource,
                                             propagation_policy.policy,
                                             status_msg)
                                 delete_func(propagation_policy=propagation_policy)
-                                create(exists_ok=dry_run)
+                                create(exists_ok=dry_run, wait_for_delete=not dry_run)
                                 return 1, 0, 1
                         raise
                 else:
