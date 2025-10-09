@@ -202,7 +202,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         k8s.client = self._setup_k8s_client()
         version = client.VersionApi(k8s.client).get_code()
-        if "-eks-" in version.git_version:
+        if "-eks-" or "-gke" in version.git_version:
             git_version = version.git_version.split("-")[0]
         else:
             git_version = version.git_version
