@@ -116,22 +116,22 @@ k8s_format_checker = FormatChecker()
 
 @k8s_format_checker.checks("int32")
 def check_int32(value):
-    return -2147483648 < value < 2147483647
+    return value is not None and (-2147483648 < value < 2147483647)
 
 
 @k8s_format_checker.checks("int64")
 def check_int64(value):
-    return -9223372036854775808 < value < 9223372036854775807
+    return value is not None and (-9223372036854775808 < value < 9223372036854775807)
 
 
 @k8s_format_checker.checks("float")
 def check_float(value):
-    return -3.4E+38 < value < +3.4E+38
+    return value is not None and (-3.4E+38 < value < +3.4E+38)
 
 
 @k8s_format_checker.checks("double")
 def check_double(value):
-    return -1.7E+308 < value < +1.7E+308
+    return value is not None and (-1.7E+308 < value < +1.7E+308)
 
 
 @k8s_format_checker.checks("byte", ValueError)
@@ -619,9 +619,9 @@ class K8SResourcePluginMixin:
         errors = list(self._validate_resource(manifest, source))
         if errors:
             for error in errors:
-                if source:
-                    self.logger.error("Error detected in K8S manifest %s from %s",
-                                      resource_description, source, exc_info=error)
+                self.logger.error("Error detected in K8S manifest %s from %s: \n%s",
+                                  resource_description, source or "<unknown>", yaml.safe_dump(manifest, None),
+                                  exc_info=error)
             raise errors[0]
 
         rdef = self._get_manifest_rdef(manifest)
