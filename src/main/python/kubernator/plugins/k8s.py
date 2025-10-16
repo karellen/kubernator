@@ -30,6 +30,7 @@ from typing import Iterable, Callable, Sequence
 
 import jsonpatch
 import yaml
+from kubernetes.client import ApiException
 
 from kubernator.api import (KubernatorPlugin,
                             Globs,
@@ -83,6 +84,21 @@ def normalize_pkg_version(v: str):
     return tuple(map(int, v_split))
 
 
+def api_exc_normalize_body(e: "ApiException"):
+    if e.headers and "content-type" in e.headers:
+        content_type = e.headers["content-type"]
+        if content_type == "application/json" or content_type.endswith("+json"):
+            e.body = json.loads(e.body)
+        elif (content_type in ("application/yaml", "application/x-yaml", "text/yaml",
+                               "text/x-yaml") or content_type.endswith("+yaml")):
+            e.body = yaml.safe_load(e.body)
+
+
+def api_exc_format_body(e: ApiException):
+    if not isinstance(e.body, (str, bytes)):
+        e.body = json.dumps(e.body, indent=4)
+
+
 class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     logger = logger
 
@@ -122,6 +138,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                                       ("apps", "Deployment"): K8SPropagationPolicy.ORPHAN,
                                                       ("storage.k8s.io", "StorageClass"): K8SPropagationPolicy.ORPHAN,
                                                       (None, "Pod"): K8SPropagationPolicy.BACKGROUND,
+                                                      ("batch", "Job"): K8SPropagationPolicy.ORPHAN,
                                                       },
                                    default_includes=Globs(["*.yaml", "*.yml"], True),
                                    default_excludes=Globs([".*"], True),
@@ -412,8 +429,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         def handle_400_strict_validation_error(e: ApiException):
             if e.status == 400:
-                status = json.loads(e.body)
-
+                # Assumes the body has been parsed
+                status = e.body
                 if status["status"] == "Failure":
                     if FIELD_VALIDATION_STRICT_MARKER in status["message"]:
                         message = status["message"]
@@ -435,19 +452,24 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 try:
                     create_func()
                     return
-                except ApiException as e:
-                    if exists_ok or wait_for_delete:
-                        if e.status == 409:
-                            status = json.loads(e.body)
-                            if status["reason"] == "AlreadyExists":
-                                if wait_for_delete:
-                                    sleep(self.context.k8s.conflict_retry_delay)
-                                    logger.info("Retry creating resource %s%s%s", resource, status_msg,
-                                                " (ignoring existing)" if exists_ok else "")
-                                    continue
-                                else:
-                                    return
-                    raise
+                except ApiException as __e:
+                    api_exc_normalize_body(__e)
+                    try:
+                        if exists_ok or wait_for_delete:
+                            if __e.status == 409:
+                                status = __e.body
+                                if status["reason"] == "AlreadyExists":
+                                    if wait_for_delete:
+                                        sleep(self.context.k8s.conflict_retry_delay)
+                                        logger.info("Retry creating resource %s%s%s", resource, status_msg,
+                                                    " (ignoring existing)" if exists_ok else "")
+                                        continue
+                                    else:
+                                        return
+                        raise
+                    except ApiException as ___e:
+                        api_exc_format_body(___e)
+                        raise
 
         merge_instrs, normalized_manifest = extract_merge_instructions(resource.manifest, resource)
         if merge_instrs:
@@ -461,15 +483,20 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             remote_resource = resource.get()
             logger.trace("Current resource %s: %s", resource, remote_resource)
         except ApiException as e:
-            if e.status == 404:
-                try:
-                    create()
-                    return 1, 0, 0
-                except ApiException as e:
-                    if not handle_400_strict_validation_error(e):
-                        raise
-
-            else:
+            api_exc_normalize_body(e)
+            try:
+                if e.status == 404:
+                    try:
+                        create()
+                        return 1, 0, 0
+                    except ApiException as e:
+                        api_exc_normalize_body(e)
+                        if not handle_400_strict_validation_error(e):
+                            raise
+                else:
+                    raise
+            except ApiException as _e:
+                api_exc_format_body(_e)
                 raise
         else:
             logger.trace("Attempting to retrieve a normalized patch for resource %s: %s", resource, normalized_manifest)
@@ -479,36 +506,44 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                                  dry_run=True,
                                                  force=True)
             except ApiException as e:
-                if e.status == 422:
-                    status = json.loads(e.body)
-                    details = status["details"]
-                    immutable_key = details.get("group"), details["kind"]
+                try:
+                    api_exc_normalize_body(e)
 
-                    try:
-                        propagation_policy = self.context.k8s.immutable_changes[immutable_key]
-                    except KeyError:
-                        raise e from None
+                    if e.status == 422:
+                        status = e.body
+                        # Assumes the body has been unmarshalled
+                        details = status["details"]
+                        immutable_key = details.get("group"), details["kind"]
+
+                        try:
+                            propagation_policy = self.context.k8s.immutable_changes[immutable_key]
+                        except KeyError:
+                            raise e from None
+                        else:
+                            for cause in details["causes"]:
+                                if (
+                                        cause["reason"] == "FieldValueInvalid" and
+                                        "field is immutable" in cause["message"]
+                                        or
+                                        cause["reason"] == "FieldValueForbidden" and
+                                        ("Forbidden: updates to" in cause["message"]
+                                         or
+                                         "Forbidden: pod updates" in cause["message"])
+                                ):
+                                    logger.info("Deleting resource %s (cascade %s)%s", resource,
+                                                propagation_policy.policy,
+                                                status_msg)
+                                    delete_func(propagation_policy=propagation_policy)
+                                    create(exists_ok=dry_run, wait_for_delete=not dry_run)
+                                    return 1, 0, 1
+                            raise
                     else:
-                        for cause in details["causes"]:
-                            if (
-                                    cause["reason"] == "FieldValueInvalid" and
-                                    "field is immutable" in cause["message"]
-                                    or
-                                    cause["reason"] == "FieldValueForbidden" and
-                                    ("Forbidden: updates to" in cause["message"]
-                                     or
-                                     "Forbidden: pod updates" in cause["message"])
-                            ):
-                                logger.info("Deleting resource %s (cascade %s)%s", resource,
-                                            propagation_policy.policy,
-                                            status_msg)
-                                delete_func(propagation_policy=propagation_policy)
-                                create(exists_ok=dry_run, wait_for_delete=not dry_run)
-                                return 1, 0, 1
-                        raise
-                else:
-                    if not handle_400_strict_validation_error(e):
-                        raise
+                        if not handle_400_strict_validation_error(e):
+                            raise
+                except ApiException as _e:
+                    api_exc_format_body(_e)
+                    raise
+
             else:
                 logger.trace("Merged resource %s: %s", resource, merged_resource)
                 if merge_instrs:
