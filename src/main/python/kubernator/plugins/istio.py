@@ -25,6 +25,7 @@ from pathlib import Path
 from shutil import which
 
 import yaml
+
 from kubernator.api import (KubernatorPlugin, scan_dir,
                             TemplateEngine,
                             load_remote_file,
@@ -34,6 +35,7 @@ from kubernator.api import (KubernatorPlugin, scan_dir,
                             get_golang_os,
                             get_golang_machine,
                             prepend_os_path, jp, load_file)
+from kubernator.plugins.k8s import api_exc_normalize_body, api_exc_format_body
 from kubernator.plugins.k8s_api import K8SResourcePluginMixin
 
 logger = logging.getLogger("kubernator.istio")
@@ -277,11 +279,17 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         try:
             res.delete(dry_run=dry_run)
         except ApiException as e:
-            skip = False
-            if e.status == 404 and missing_ok:
-                skip = True
-            if not skip:
+            api_exc_normalize_body(e)
+            try:
+                skip = False
+                if e.status == 404 and missing_ok:
+                    skip = True
+                if not skip:
+                    raise
+            except ApiException as e:
+                api_exc_format_body(e)
                 raise
+
         return res
 
     def _create_resource_internal(self, manifest, dry_run=True, exists_ok=False):
@@ -297,12 +305,18 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             res.create(dry_run=dry_run)
         except ApiException as e:
             skip = False
-            if e.status == 409:
-                status = json.loads(e.body)
-                if status["reason"] == "AlreadyExists" and exists_ok:
-                    skip = True
-            if not skip:
+            api_exc_normalize_body(e)
+            try:
+                if e.status == 409:
+                    status = e.body
+                    if status["reason"] == "AlreadyExists" and exists_ok:
+                        skip = True
+                if not skip:
+                    raise
+            except ApiException as e:
+                api_exc_format_body(e)
                 raise
+
         return res
 
     def _install(self, operators_file, dry_run):
