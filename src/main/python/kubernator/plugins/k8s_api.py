@@ -23,7 +23,6 @@ from collections import namedtuple
 from collections.abc import Callable, Mapping, MutableMapping, Sequence, Iterable
 from enum import Enum, auto
 from functools import partial
-from io import StringIO
 from pathlib import Path
 from typing import Union, Optional
 
@@ -34,7 +33,7 @@ from jsonschema.exceptions import ValidationError
 from jsonschema.validators import extend, Draft7Validator
 from openapi_schema_validator import OAS31Validator
 
-from kubernator.api import load_file, FileType, load_remote_file, calling_frame_source
+from kubernator.api import load_file, FileType, load_remote_file, calling_frame_source, parse_yaml_docs
 
 K8S_WARNING_HEADER = re.compile(r'(?:,\s*)?(\d{3})\s+(\S+)\s+"(.+?)(?<!\\)"(?:\s+\"(.+?)(?<!\\)\")?\s*')
 UPPER_FOLLOWED_BY_LOWER_RE = re.compile(r"(.)([A-Z][a-z]+)")
@@ -524,7 +523,7 @@ class K8SResourcePluginMixin:
             source = calling_frame_source()
 
         if isinstance(manifests, str):
-            manifests = list(yaml.safe_load_all(StringIO(manifests)))
+            manifests = list(parse_yaml_docs(manifests, source))
 
         if isinstance(manifests, (Mapping, dict)):
             return self.add_resource(manifests, source)
@@ -557,7 +556,7 @@ class K8SResourcePluginMixin:
             source = calling_frame_source()
 
         if isinstance(manifests, str):
-            manifests = list(yaml.safe_load_all(StringIO(manifests)))
+            manifests = list(parse_yaml_docs(manifests, source))
 
         if isinstance(manifests, (Mapping, dict)):
             return self.add_crd(manifests, source)
@@ -614,8 +613,13 @@ class K8SResourcePluginMixin:
 
     def _create_resource(self, manifest: dict, source: Union[str, Path] = None):
         resource_description = K8SResource.get_manifest_description(manifest, source)
-        self.logger.debug("Validating K8S manifest for %s", resource_description)
 
+        new_manifest = self._patch_manifest(manifest, resource_description)
+        if new_manifest != manifest:
+            manifest = new_manifest
+            resource_description = K8SResource.get_manifest_description(manifest, source)
+
+        self.logger.debug("Validating K8S manifest for %s", resource_description)
         errors = list(self._validate_resource(manifest, source))
         if errors:
             for error in errors:
@@ -643,6 +647,11 @@ class K8SResourcePluginMixin:
             self._add_crd(resource)
 
         return resource
+
+    def _patch_manifest(self,
+                        manifest: dict,
+                        resource_description: str):
+        return manifest
 
     def _transform_resource(self,
                             resources: Sequence[K8SResource],
