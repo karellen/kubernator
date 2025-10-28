@@ -23,7 +23,6 @@ if not is_anything_patched():
     patch_all()
 
 import unittest
-from io import StringIO
 from textwrap import dedent
 
 
@@ -38,9 +37,9 @@ class Issue55Testcase(unittest.TestCase):
         - '!~'
         type: string
         """)
-        yaml_doc = yaml.safe_load(StringIO(source))
+        yaml_doc = yaml.safe_load(source)
         self.assertEqual(yaml_doc["enum"], ["!=", "=", "=~", "!~"])
 
         import yaml
-        yaml_doc = yaml.safe_load(StringIO(source))
+        yaml_doc = yaml.safe_load(source)
         self.assertEqual(yaml_doc["enum"], ["!=", "=", "=~", "!~"])

@@ -112,6 +112,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         self._transformers = []
         self._validators = []
+        self._manifest_patchers = []
         self._summary = 0, 0, 0
         self._template_engine = TemplateEngine(logger)
 
@@ -150,6 +151,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                    add_transformer=self.api_add_transformer,
                                    remove_transformer=self.api_remove_transformer,
                                    add_validator=self.api_remove_validator,
+                                   add_manifest_patcher=self.api_add_manifest_patcher,
                                    get_api_versions=self.get_api_versions,
                                    create_resource=self.create_resource,
                                    disable_client_patches=disable_client_patches,
@@ -373,6 +375,10 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         if validator not in self._validators:
             self._validators.append(validator)
 
+    def api_add_manifest_patcher(self, patcher):
+        if patcher not in self._manifest_patchers:
+            self._manifest_patchers.append(patcher)
+
     def api_remove_transformer(self, transformer):
         if transformer in self._transformers:
             self._transformers.remove(transformer)
@@ -390,6 +396,17 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             tb = types.TracebackType(tb, frame, frame.f_lasti, frame.f_lineno)
             frame = frame.f_back
         return ValueError((msg % args) if args else msg).with_traceback(tb)
+
+    def _patch_manifest(self,
+                        manifest: dict,
+                        resource_description: str):
+        for patcher in reversed(self._manifest_patchers):
+            logger.debug("Applying patcher %s to %s",
+                         getattr(patcher, "__name__", patcher),
+                         resource_description)
+            manifest = patcher(manifest, resource_description) or manifest
+
+        return manifest
 
     def _transform_resource(self, resources: Sequence[K8SResource], resource: K8SResource) -> K8SResource:
         for transformer in reversed(self._transformers):

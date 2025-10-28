@@ -20,10 +20,10 @@ import fnmatch
 import json
 import logging
 import os
-import io
 import platform
 import re
 import sys
+import textwrap
 import traceback
 import urllib.parse
 from collections.abc import Callable
@@ -48,6 +48,7 @@ from jinja2 import (Environment,
                     pass_context)
 from jsonschema import validators
 from platformdirs import user_cache_dir
+from yaml import MarkedYAMLError
 
 from kubernator._json_path import jp  # noqa: F401
 from kubernator._k8s_client_patches import (URLLIB_HEADERS_PATCH,
@@ -57,6 +58,43 @@ from kubernator._k8s_client_patches import (URLLIB_HEADERS_PATCH,
 _CACHE_HEADER_TRANSLATION = {"etag": "if-none-match",
                              "last-modified": "if-modified-since"}
 _CACHE_HEADERS = ("etag", "last-modified")
+
+
+def to_json(obj: Union[dict, list]):
+    return json.dumps(obj)
+
+
+def to_yaml_str(s: str):
+    return repr(s)
+
+
+def to_json_yaml_str(obj: Union[dict, list]):
+    """
+    Takes `obj`, dumps as json representation, converts json representation to YAML string literal.
+    """
+    return to_yaml_str(to_json(obj))
+
+
+def to_yaml_str_block(s: str, indent: int = 4, pretty_indent: int = 2):
+    """
+    Takes a multiline string, dedents it then indents it `indent` spaces for in-yaml alignment and
+    `pretty-indent` spaces for in-block alignment.
+    """
+    return (f"|+{pretty_indent}\n" +
+            textwrap.indent(textwrap.dedent(s), " " * (indent + pretty_indent)))
+
+
+def to_json_yaml_str_block(obj: Union[str, dict, list], indent: int = 4, pretty_indent=2):
+    """
+    Takes an `obj`, serializes it as pretty JSON with `pretty_indent` in-json indentation and then
+    passes it to `to_yaml_str_block`.
+    """
+    return to_yaml_str_block(json.dumps(obj, indent=pretty_indent), indent=indent, pretty_indent=pretty_indent)
+
+
+def to_yaml(obj: Union[dict, list], level_indent: int, indent: int):
+    s = yaml.safe_dump(obj, indent=indent)
+    return "\n" + textwrap.indent(s, " " * level_indent)
 
 
 class TemplateEngine:
@@ -97,7 +135,15 @@ class TemplateEngine:
                                variable_end_string=self.VARIABLE_END_STRING,
                                autoescape=False,
                                finalize=variable_finalizer,
-                               undefined=logging_undefined)
+                               undefined=logging_undefined,
+                               )
+
+        self.env.filters["to_json"] = to_json
+        self.env.filters["to_yaml_str"] = to_yaml_str
+        self.env.filters["to_yaml"] = to_yaml
+        self.env.filters["to_yaml_str_block"] = to_yaml_str_block
+        self.env.filters["to_json_yaml_str_block"] = to_json_yaml_str_block
+        self.env.filters["to_json_yaml_str"] = to_json_yaml_str
 
     def from_string(self, template):
         return self.env.from_string(template)
@@ -136,9 +182,18 @@ def scan_dir(logger, path: Path, path_filter: Callable[[os.DirEntry], bool], exc
                 yield path / f
 
 
+def parse_yaml_docs(document: str, source=None):
+    try:
+        return list(d for d in yaml.safe_load_all(document) if d)
+    except MarkedYAMLError:
+        raise
+
+
 class FileType(Enum):
-    JSON = (json.load,)
-    YAML = (yaml.safe_load_all,)
+    TEXT = (lambda x: x,)
+    BINARY = (lambda x: x,)
+    JSON = (json.loads,)
+    YAML = (parse_yaml_docs,)
 
     def __init__(self, func):
         self.func = func
@@ -147,13 +202,13 @@ class FileType(Enum):
 def _load_file(logger, path: Path, file_type: FileType, source=None,
                template_engine: Optional[TemplateEngine] = None,
                template_context: Optional[dict] = None) -> Iterable[dict]:
-    with open(path, "rb" if not template_engine else "rt") as f:
+    with open(path, "rb" if file_type == FileType.BINARY else "rt") as f:
         try:
-            if template_engine:
+            if template_engine and not file_type == FileType.BINARY:
                 raw_data = template_engine.from_string(f.read()).render(template_context)
-                f.close()
-                f = io.StringIO(raw_data)
-            data = file_type.func(f)
+            else:
+                raw_data = f.read()
+            data = file_type.func(raw_data)
             if isinstance(data, GeneratorType):
                 data = list(data)
             return data

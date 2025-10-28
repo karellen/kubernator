@@ -16,7 +16,6 @@
 #   limitations under the License.
 #
 
-import io
 import json
 import logging
 import os
@@ -121,7 +120,7 @@ class KubectlPlugin(KubernatorPlugin):
             args += ["-n", namespace]
         args += ["-o", "yaml"]
 
-        res = list(yaml.safe_load_all(io.StringIO(self.context.kubectl.run_capturing(*args))))
+        res = list(yaml.safe_load_all(self.context.kubectl.run_capturing(*args)))
         if len(res):
             if len(res) > 1:
                 return res
