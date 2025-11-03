@@ -207,9 +207,10 @@ class HelmPlugin(KubernatorPlugin):
 
     def _add_repository(self, repository: str):
         def _update_repositories():
-            self.context.app.run(self.stanza() + ["repo", "update"],
-                                 stdout_logger,
-                                 stderr_logger).wait()
+            if self.repositories:
+                self.context.app.run(self.stanza() + ["repo", "update"],
+                                     stdout_logger,
+                                     stderr_logger).wait()
 
         if self._repositories_not_populated:
             preexisting_repositories = json.loads(
