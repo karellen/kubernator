@@ -104,6 +104,8 @@ class HelmPlugin(KubernatorPlugin):
         self.helm_dir = None
         self.template_engine = TemplateEngine(logger)
 
+        self._repositories_not_populated = True
+
     def set_context(self, context):
         self.context = context
 
@@ -204,6 +206,22 @@ class HelmPlugin(KubernatorPlugin):
         return self._internal_add_helm(source, **{k.replace("-", "_"): v for k, v in template.items()})
 
     def _add_repository(self, repository: str):
+        def _update_repositories():
+            self.context.app.run(self.stanza() + ["repo", "update"],
+                                 stdout_logger,
+                                 stderr_logger).wait()
+
+        if self._repositories_not_populated:
+            preexisting_repositories = json.loads(
+                self.context.app.run_capturing_out(self.stanza() + ["repo", "list", "-o", "json"], stderr_logger))
+            for pr in preexisting_repositories:
+                repo_name = pr["name"]
+                repo_url = pr["url"]
+                logger.debug("Recording pre-existing repository %s mapping %s", repo_name, repo_url)
+                self.repositories.add(repo_name)
+            _update_repositories()
+            self._repositories_not_populated = False
+
         repository_hash = sha256(repository.encode("UTF-8")).hexdigest()
         logger.debug("Repository %s mapping to %s", repository, repository_hash)
         if repository_hash not in self.repositories:
@@ -211,9 +229,7 @@ class HelmPlugin(KubernatorPlugin):
             self.context.app.run(self.stanza() + ["repo", "add", repository_hash, repository],
                                  stdout_logger,
                                  stderr_logger).wait()
-            self.context.app.run(self.stanza() + ["repo", "update"],
-                                 stdout_logger,
-                                 stderr_logger).wait()
+            _update_repositories()
             self.repositories.add(repository_hash)
 
         return repository_hash
