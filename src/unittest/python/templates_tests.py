@@ -102,3 +102,21 @@ class TemplateTestcase(unittest.TestCase):
                 x: 1
                 y: 2
         """))
+
+    def test_deep_value_resolution_to_json(self):
+        te = TemplateEngine(Mock())
+        t = te.from_string(textwrap.dedent("""
+        a: {${ values.file_contents }$}
+        """))
+        rendered = t.render({"values": {"file_contents": "{${ ktor.file_contents | to_json }$}"},
+                             "ktor": {"file_contents": {"a": "x", "b": "y"}}})
+        self.assertEqual(rendered, '\na: {"a": "x", "b": "y"}')
+
+    def test_deep_value_resolution_to_json_yaml_str(self):
+        te = TemplateEngine(Mock())
+        t = te.from_string(textwrap.dedent("""
+        a: {${ values.file_contents }$}
+        """))
+        rendered = t.render({"values": {"file_contents": "{${ ktor.file_contents | to_json_yaml_str }$}"},
+                             "ktor": {"file_contents": {"a": "x", "b": "y"}}})
+        self.assertEqual(rendered, '\na: \'{"a": "x", "b": "y"}\'\n')

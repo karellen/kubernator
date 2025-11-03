@@ -65,7 +65,7 @@ def to_json(obj: Union[dict, list]):
 
 
 def to_yaml_str(s: str):
-    return repr(s)
+    return yaml.safe_dump(s)
 
 
 def to_json_yaml_str(obj: Union[dict, list]):
