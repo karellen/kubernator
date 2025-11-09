@@ -37,7 +37,7 @@ from kubernator.api import (KubernatorPlugin, Globs, StripNL,
                             validator_with_defaults,
                             get_golang_os,
                             get_golang_machine,
-                            prepend_os_path, TemplateEngine
+                            prepend_os_path, TemplateEngine, get_cache_dir
                             )
 from kubernator.plugins.k8s_api import K8SResource
 from kubernator.proc import DEVNULL
@@ -105,18 +105,22 @@ class HelmPlugin(KubernatorPlugin):
         self.template_engine = TemplateEngine(logger)
 
         self._repositories_not_populated = True
+        self._helm_repositories_file = None
+        self._charts_used: dict[str, list[tuple[str, str]]] = {}
 
     def set_context(self, context):
         self.context = context
 
     def stanza(self):
         context = self.context
-        stanza = [context.helm.helm_file, f"--kubeconfig={context.kubeconfig.kubeconfig}"]
+        stanza = [context.helm.helm_file,
+                  f"--kubeconfig={context.kubeconfig.kubeconfig}",
+                  f"--repository-config={self._helm_repositories_file}"]
         if logger.getEffectiveLevel() < logging.INFO:
             stanza.append("--debug")
         return stanza
 
-    def register(self, version=None):
+    def register(self, version=None, check_chart_versions=False):
         context = self.context
         context.app.register_plugin("kubeconfig")
         context.app.register_plugin("k8s")
@@ -145,6 +149,8 @@ class HelmPlugin(KubernatorPlugin):
 
             logger.debug("Found Helm in %r", helm_file)
 
+        helm_dir = get_cache_dir("helm")
+        self._helm_repositories_file = Path(helm_dir) / "repositories.yaml"
         context.globals.helm = dict(default_includes=Globs(["*.helm.yaml", "*.helm.yml"], True),
                                     default_excludes=Globs([".*"], True),
                                     namespace_transformer=True,
@@ -152,6 +158,7 @@ class HelmPlugin(KubernatorPlugin):
                                     stanza=self.stanza,
                                     add_helm_template=self.add_helm_template,
                                     add_helm=self.add_helm,
+                                    check_chart_versions=check_chart_versions,
                                     )
 
     def handle_init(self):
@@ -189,6 +196,39 @@ class HelmPlugin(KubernatorPlugin):
 
             for helm_template in helm_templates:
                 self._add_helm(helm_template, display_p)
+
+    def handle_summary(self):
+        context = self.context
+        if context.helm.check_chart_versions:
+            logger.info("Checking Helm chart versions")
+            all_chart_versions = json.loads(self.context.app.run_capturing_out(self.stanza() +
+                                                                               ["search", "repo",
+                                                                                "-l", "-o", "json",
+                                                                                ],
+                                                                               stderr_logger,
+                                                                               ))
+
+            def chart_version_part_normalizer(x):
+                return int(x) if x.isnumeric() else x
+
+            def chart_version_normalizer(x):
+                return tuple(map(chart_version_part_normalizer, x.split(".")))
+
+            charts_versions = {}
+            for chart_version in all_chart_versions:
+                charts_versions.setdefault(chart_version["name"], []).append(
+                    chart_version_normalizer(chart_version["version"]))
+
+            for chart, version_source in self._charts_used.items():
+                chart_versions = sorted(charts_versions[chart])
+                for version, source in version_source:
+                    if chart_versions[-1] > chart_version_normalizer(version):
+                        logger.warning("Chart %s is version %s while the latest is %s (defined in %s)",
+                                       chart.split("/")[1],
+                                       version,
+                                       ".".join(map(str, chart_versions[-1])),
+                                       source,
+                                       )
 
     def add_helm_template(self, template):
         return self._add_helm(template, calling_frame_source())
@@ -268,6 +308,8 @@ class HelmPlugin(KubernatorPlugin):
         if repository:
             repository_hash = self._add_repository(repository)
             chart_name = f"{repository_hash}/{chart}"
+            if version:
+                self._charts_used.setdefault(chart_name, []).append((version, source))
         else:
             chart_name = chart
 
