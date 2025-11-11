@@ -239,6 +239,28 @@ class App(KubernatorPlugin):
                 logger.info("Plugin %r discovered in %r", plugin._name, plugin)
                 self._plugin_types[plugin._name] = plugin
 
+    def assert_plugin(self, plugin: Union[KubernatorPlugin, type[KubernatorPlugin], str],
+                      requester: Union[KubernatorPlugin, type[KubernatorPlugin], str]):
+        context = self.context
+        if isinstance(plugin, str):
+            try:
+                plugin_type = self._plugin_types[plugin]
+            except KeyError:
+                logger.critical("No known plugin with the name %r", plugin)
+                raise RuntimeError("No known plugin with the name %r" % (plugin,))
+        elif isinstance(plugin, type):
+            plugin_type = plugin
+        else:
+            plugin_type = type(plugin)
+
+        for p in context._plugins:
+            if p._name == plugin_type._name:
+                return
+
+        raise RuntimeError("Plugin %s requires plugin %s to be initialized",
+                           requester if hasattr(requester, "_name") else requester,
+                           plugin)
+
     def register_plugin(self, plugin: Union[KubernatorPlugin, type, str], **kwargs):
         context = self.context
         if isinstance(plugin, str):
@@ -340,6 +362,7 @@ class App(KubernatorPlugin):
                                    walk_remote=self.walk_remote,
                                    walk_local=self.walk_local,
                                    register_plugin=self.register_plugin,
+                                   assert_plugin=self.assert_plugin,
                                    config_as_dict=config_as_dict,
                                    config_parent=config_parent,
                                    download_remote_file=download_remote_file,
