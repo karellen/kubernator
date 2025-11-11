@@ -123,7 +123,7 @@ class HelmPlugin(KubernatorPlugin):
     def register(self, version=None, check_chart_versions=False):
         context = self.context
         context.app.register_plugin("kubeconfig")
-        context.app.register_plugin("k8s")
+        context.app.assert_plugin("k8s", self)
 
         if version:
             # Download and use specific version

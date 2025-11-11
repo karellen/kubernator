@@ -67,7 +67,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     def register(self, version=None):
         context = self.context
         context.app.register_plugin("kubeconfig")
-        context.app.register_plugin("k8s")
+        context.app.assert_plugin("k8s", self)
 
         if version:
             # Download and use specific version
