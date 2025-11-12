@@ -27,9 +27,9 @@ jobs:
           - '3.11'
           - '3.10'
           - '3.9'
-#        include:
-#          - os: macos-13
-#            python-version: '3.13'
+        include:
+          - os: macos-15-intel
+            python-version: '3.14'
     env:
       DEPLOY_PYTHONS: "3.13"
       DEPLOY_OSES: "Linux"
@@ -60,23 +60,6 @@ jobs:
       #          brew update
       #          brew install hyperkit
       #          hyperkit -v
-
-      - name: Install Docker on MacOS
-        if: |
-          runner.os == 'macOS'
-
-        shell: bash
-        run: |
-          set -x
-          brew update
-          brew install docker colima
-
-          colima version
-          colima start --cpu 3 --memory 8 --disk 7
-          sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
-
-          while ! docker info > /dev/null 2>&1; do sleep 1 ; done
-          docker info
 
       - name: Aggressive cleanup
         run: |
@@ -116,6 +99,43 @@ jobs:
           docker system prune -af || true
           docker builder prune -af || true
           df -h
+
+#      - name: Install Docker on MacOS
+#        if: |
+#          runner.os == 'macOS'
+#
+#        shell: bash
+#        run: |
+#          set -x
+#          brew update
+#          brew install docker colima
+#
+#          colima version
+#          CPU_COUNT=$(sysctl -n hw.ncpu)
+#          MEMORY=$(sysctl hw.memsize | awk '{print $2/1024/1024/1024}')
+#          COLIMA_ARGS="--cpu $CPU_COUNT --memory $MEMORY --arch x86_64 --vm-type=vz --mount-type=virtiofs"
+#          colima start $COLIMA_ARGS
+#          sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
+#
+#          while ! docker info > /dev/null 2>&1; do sleep 1 ; done
+#          which docker
+#          docker info
+
+      - name: Setup Docker on macOS
+        if: |
+          runner.os == 'macOS'
+
+        id: setup-docker
+        uses: douglascamata/setup-docker-macos-action@main
+
+      - name: Docker PATH
+        if: |
+          runner.os == 'macOS'
+
+        run: |
+          echo /usr/local/bin >> $GITHUB_PATH
+          echo /usr/local/sbin >> $GITHUB_PATH
+          which docker
 
       - name: Should Upload
         if: |
