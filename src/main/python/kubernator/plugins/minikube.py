@@ -20,6 +20,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
+from shutil import which
 
 from kubernator.api import (KubernatorPlugin,
                             StripNL,
@@ -138,6 +139,7 @@ class MinikubePlugin(KubernatorPlugin):
         self.kubeconfig_dir.mkdir(parents=True, exist_ok=True)
 
         if not driver:
+            logger.warning(f"PATH: {os.environ['PATH']}, which docker {which('docker')}")
             driver = "docker"
             if get_golang_os() == "darwin":
                 logger.debug("Auto-detecting Minikube driver on MacOS...")
