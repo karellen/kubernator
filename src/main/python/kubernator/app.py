@@ -25,6 +25,7 @@ import sys
 import urllib.parse
 from collections import deque
 from collections.abc import MutableMapping, Callable
+from contextlib import closing
 from pathlib import Path
 from shutil import rmtree
 from typing import Optional, Union
@@ -80,12 +81,12 @@ def define_arg_parse():
                         help="do not patch the k8s client being pre-cached")
     parser.add_argument("--log-format", choices=["human", "json"], default="human",
                         help="whether to log for human or machine consumption")
-    parser.add_argument("--log-file", type=argparse.FileType("w"), default=None,
+    parser.add_argument("--log-file", type=str, default=None,
                         help="where to log, defaults to `stderr`")
     parser.add_argument("-v", "--verbose", choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "TRACE"],
                         default="INFO", help="how verbose do you want Kubernator to be")
-    parser.add_argument("-f", "--file", type=argparse.FileType("w"), default=sys.stdout,
-                        help="where to generate results, if necessary")
+    parser.add_argument("-f", "--file", type=str, default=None,
+                        help="where to generate results, if necessary, defaults to `stdout`")
     parser.add_argument("-o", "--output-format", choices=["json", "json-pretty", "yaml"], default="yaml",
                         help="in what format to generate results")
     parser.add_argument("-p", "--path", dest="path", default=".",
@@ -529,7 +530,17 @@ def main():
     if not args.pre_cache_k8s_client and args.pre_cache_k8s_client_no_patch is not None:
         argparser.error("--pre-cache-k8s-client-no-patch can only be used with --pre-cache-k8s-client")
 
-    init_logging(args.verbose, args.log_format, args.log_file)
+    if args.log_file:
+        log_stream = open(args.log_file, "w")
+    else:
+        log_stream = sys.stderr
+
+    if args.file:
+        args.file = open(args.file, "w")
+    else:
+        args.file = sys.stdout
+
+    init_logging(args.verbose, args.log_format, log_stream)
 
     try:
         if args.clear_cache:
@@ -555,4 +566,12 @@ def main():
     else:
         logger.info("Kubernator terminated successfully")
     finally:
-        logging.shutdown()
+        try:
+            logging.shutdown()
+        finally:
+            if log_stream != sys.stderr:
+                with closing(log_stream):
+                    pass
+            if args.file != sys.stdout:
+                with closing(args.file):
+                    pass

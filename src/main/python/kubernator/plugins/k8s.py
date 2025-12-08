@@ -147,6 +147,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                    load_resources=self.api_load_resources,
                                    load_remote_resources=self.api_load_remote_resources,
                                    load_crds=self.api_load_crds,
+                                   import_cluster_crds=self.api_import_cluster_crds,
                                    load_remote_crds=self.api_load_remote_crds,
                                    add_transformer=self.api_add_transformer,
                                    remove_transformer=self.api_remove_transformer,
@@ -366,6 +367,20 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
     def api_load_remote_crds(self, url: str, file_type: str, file_category=None):
         return self.add_remote_crds(url, FileType[file_type.upper()], sub_category=file_category)
+
+    def api_import_cluster_crds(self):
+        context = self.context
+        k8s = context.k8s
+        client = k8s.client
+        from kubernetes import client as client_module
+
+        api = client_module.ApiextensionsV1Api(client)
+        crds = api.list_custom_resource_definition(watch=False)
+        for crd in crds.items:
+            manifest = client.sanitize_for_serialization(crd)
+            manifest["apiVersion"] = "apiextensions.k8s.io/v1"
+            manifest["kind"] = "CustomResourceDefinition"
+            self.add_crd(manifest)
 
     def api_add_transformer(self, transformer):
         if transformer not in self._transformers:
