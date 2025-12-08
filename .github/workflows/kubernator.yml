@@ -72,7 +72,7 @@ jobs:
           brew install docker colima
 
           colima version
-          colima start --cpu 3 --memory 8 --disk 7
+          colima start --cpu 3 --memory 6 --disk 7
           sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
 
           while ! docker info > /dev/null 2>&1; do sleep 1 ; done
