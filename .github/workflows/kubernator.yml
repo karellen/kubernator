@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       packages: write
-      contents: read
+      contents: write
     continue-on-error: false
     strategy:
       fail-fast: false
@@ -117,15 +117,6 @@ jobs:
           docker builder prune -af || true
           df -h
 
-      - name: Should Upload
-        if: |
-          github.event_name == 'push' &&
-          contains(env.DEPLOY_OSES, runner.os) &&
-          contains(env.DEPLOY_PYTHONS, matrix.python-version)
-
-        shell: bash
-        run: echo "PYB_EXTRA_ARGS=+upload" >> "$GITHUB_ENV"
-
       - name: Login to GitHub Container Registry for Upload
         if: |
           github.event_name == 'push' &&
@@ -143,7 +134,10 @@ jobs:
         with:
           homebrew-python: true
           python-version: ${{ matrix.python-version }}
-          pyb-extra-args: ${{ env.PYB_EXTRA_ARGS }}
+          is-upload: >-
+            ${{ github.event_name == 'push'
+            && contains(env.DEPLOY_OSES, runner.os)
+            && contains(env.DEPLOY_PYTHONS, matrix.python-version) }}
 
   build-summary:
     if: success() || failure()
