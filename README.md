@@ -40,154 +40,509 @@ trademarks are property of their respective owners.
 
 ## Problem Statement
 
+Real-world Kubernetes deployments are rarely a flat pile of YAML files. A single environment typically combines:
+
+- plain Kubernetes manifests kept under version control,
+- Helm charts from public and private repositories (including OCI),
+- Istio meshes installed via operator manifests,
+- Custom Resource Definitions shipped separately from the resources that consume them,
+- infrastructure outputs from Terraform or Terragrunt (VPC IDs, cluster endpoints, ARNs),
+- credentials and kubeconfig files that differ per environment (EKS, GKE, Minikube, bare clusters),
+- Jinja-rendered templates with values that must be shared across many resources,
+- chunks of configuration that live in other git repositories and must be pulled in at deploy time.
+
+Tools that cover one piece of this well (`kubectl`, `helm`, `kustomize`, `helmfile`, `terraform`) each have their own
+state model, their own templating semantics, and their own assumptions about where files live. Gluing them together
+usually ends up as ad-hoc shell scripts that duplicate logic across environments, hide their dependencies, and are
+difficult to test.
+
 ## Solution
 
-## Using Kubernator with Docker
+Kubernator is a CLI that walks a directory tree, executes an optional `.kubernator.py` script in each directory, and
+runs a pipeline of plugins that generate, transform, validate, and apply Kubernetes resources. The directory tree
+defines structure; the scripts define composition; the plugins define capability.
 
-A simple example is as follows:
-```
+Key properties:
+
+- **Directory-driven.** The unit of organisation is a directory. Sub-directories inherit context from their parents,
+  making environment overlays and per-service customisation natural.
+- **Plugin pipeline.** Plugins are explicitly registered by the user (not auto-loaded) and run through well-defined
+  stages: `init` → `start` → per-directory (`before_dir` → `before_script` → `.kubernator.py` → `after_script`
+  → `after_dir`) → `apply` → `summary`. Registration order is execution order.
+- **Hierarchical context.** A context object (`ktor`) follows directory traversal. Values set in `/a` are visible in
+  `/a/b` and `/a/c/d`; values set in `/a/b` are invisible in `/a/c`. `ctx.globals` is always reachable.
+- **Composability.** `ktor.app.walk_local(...)` and `ktor.app.walk_remote(...)` let a script pull in further local or
+  remote directories, including specific refs of git repositories. Remote content enters the context tree as a child
+  of the directory that queued it.
+- **Dry-run by default.** Nothing is applied to a cluster unless `--yes` is passed. The default mode (`dump`) writes
+  the diff / final manifests to stdout.
+- **Resource-aware.** The Kubernetes plugin talks to the API server directly via the Python client, resolves CRDs,
+  runs server-side field validation, and computes minimal patches instead of blindly re-applying.
+
+## Installation
+
+### Docker
+
+```shell
 $ docker run --mount type=bind,source="$(pwd)",target=/root,readonly -t ghcr.io/karellen/kubernator:latest
 ```
 
-## Using Kubernator on MacOS
+The image is tagged by version at `ghcr.io/karellen/kubernator:<version>` and `:latest` for the most recent non-dev
+release. Kubernetes client libraries for API versions 19–29 are pre-cached inside the image.
 
-```
-$ brew install python3.11
-$ pip3.11 install 'kubernator~=1.0.9'
+### MacOS
+
+```shell
+$ brew install python@3.13
+$ pip3.13 install kubernator
 $ kubernator --version
 ```
 
-Please note, that some plugins (e.g. `awscli`, `eks`) may require additional volume mounts or environmental
-variables to be passed for credentials and other external configuration.
+### Linux
+
+```shell
+$ pip install kubernator
+$ kubernator --version
+```
+
+Python 3.9 through 3.14 are supported. Some plugins (`awscli`, `eks`, `gke`) may require additional volume mounts or
+environment variables for credentials and external tooling.
+
+## Command Line Interface
+
+```
+kubernator [OPTIONS] [dump|apply]
+```
+
+| Option                               | Description                                                                    |
+|--------------------------------------|--------------------------------------------------------------------------------|
+| `--version`                          | Print version and exit.                                                        |
+| `--clear-cache`                      | Clear the application cache and exit.                                          |
+| `--clear-k8s-cache`                  | Clear the Kubernetes client library cache and exit.                            |
+| `--pre-cache-k8s-client V [V ...]`   | Download and cache the specified Kubernetes client library major versions.     |
+| `--pre-cache-k8s-client-no-patch`    | Skip Kubernator's client patches while pre-caching (diagnostic).               |
+| `--log-format {human,json}`          | Log output format. Default `human`.                                            |
+| `--log-file PATH`                    | Write logs to file instead of `stderr`.                                        |
+| `-v, --verbose LEVEL`                | `CRITICAL`/`ERROR`/`WARNING`/`INFO`/`DEBUG`/`TRACE`. Default `INFO`.            |
+| `-f, --file PATH`                    | Output file for generated manifests. Default `stdout`.                         |
+| `-o, --output-format {json,json-pretty,yaml}` | Output format. Default `yaml`.                                       |
+| `-p, --path PATH`                    | Starting directory. Default current directory.                                 |
+| `--yes`                              | Actually apply changes. Without this flag Kubernator runs as a dry-run.        |
+| `command`                            | `dump` (default) writes the computed plan; `apply` applies it to the cluster.  |
 
 ## Mode of Operation
 
-Kubernator is a command line utility. Upon startup and processing of the command line arguments and initializing
-logging, Kubernator initializes plugins. Current plugins include:
+On startup Kubernator parses command line arguments, initialises logging, discovers plugin modules (without activating
+them), and registers the always-present `app` plugin. Every other plugin must be explicitly registered by a
+`.kubernator.py` script via `ktor.app.register_plugin("<name>", **kwargs)`. The **order of `register_plugin` calls is
+the order of handler execution** for subsequent stages.
 
-0. Kubernator App
-1. Terraform
-2. kOps
-3. Kubernetes
-4. Helm
-5. Template
+The pipeline stages, in order, are:
 
-The order of initialization matters as it's the order the plugin handlers are executed!
+1. **Plugin Init** — called once per plugin when it is registered.
+2. **Plugin Start** — called once per plugin after init.
+3. **For each directory** in the traversal queue:
+    1. **Before Directory** — every registered plugin's `handle_before_dir`.
+    2. If `.kubernator.py` is present:
+        1. **Before Script** — every plugin's `handle_before_script`.
+        2. The `.kubernator.py` script itself (executed with `ktor` and `logger` in globals).
+        3. **After Script** — every plugin's `handle_after_script` (reverse order).
+    3. **After Directory** — every plugin's `handle_after_dir` (reverse order).
+4. **Apply** — every plugin's `handle_apply` (e.g. Kubernetes plugin pushes resources to the cluster when `--yes`).
+5. **Verify** — every plugin's `handle_verify`.
+6. **Shutdown** — every plugin's `handle_shutdown` (cleanups, even on failure).
+7. **Summary** — every plugin's `handle_summary` (on success only).
 
-The entire application operates in the following stages by invoking each plugin's stage handler in sequence:
+Within "for each directory", after `after_dir` fires, the app plugin scans the current directory for sub-directories,
+filters them through `context.app.excludes`, re-orders the survivors according to `context.app.includes` patterns, and
+appends them to the traversal queue. Scripts can also inject directories explicitly with `walk_local` / `walk_remote`.
 
-1. Plugin Init Stage
-2. Pre-start script (if specified)
-3. Plugin Start Stage
-4. For each directory in the pipeline:
-    1. Plugin Before Directory Stage
-    2. If `.kubernator.py` is present in the directory:
-        1. Plugin Before Script Stage
-        2. `.kubernator.py` script
-        3. Plugin After Script Stage
-    3. Plugin After Directory Stage
-5. Plugin End Stage
+## State / Context
 
-Each plugin individually plays a specific role and performs a specific function which will be described in a later
-section.
+A global state is carried through as the application runs. It is a hierarchy of `PropertyDict` objects that follows the
+parent-child relationship of directory traversal. Given `/a/b`, `/a/c`, `/a/c/d`: a value set in `/a`'s context is
+visible in all of `/a/b`, `/a/c`, `/a/c/d`; a value set in `/a/b` is visible only there; a value set in `/a/c` is
+visible in `/a/c` and `/a/c/d` but not in `/a` or `/a/b`.
 
-## State/Context
+`context.globals` is the top-most context, reachable from any stage (including those not associated with a directory).
+When traversal enters a remote directory (materialised as a local temp directory), the remote tree enters the context
+hierarchy as a child of the directory that queued it.
 
-There is a global state that is carried through as the application is running. It is a hierarchy of objects (`context`)
-that follows the parent-child relationship as the application traverses the directory structure. For example, given the
-directory structure `/a/b`, `/a/c`, and `/a/c/d` any value of the context set or modified in context scoped to
-directory `/a` is visible in directories `/a/b`, `/a/c` and `/a/c/d`, while the same modified or set in `/a/b` is only
-visible there, while one in `/a/c` is visible in `/a/c` and in `/a/c/d` but not `/a` or `/a/b`.
+Context also carries references to essential functions — not only data. In pre-start and `.kubernator.py` scripts the
+context is available as the global variable `ktor`, and a `logger` named after the script location is also injected.
 
-Additionally, there is a `context.globals` which is the top-most context that is available in all stages that are not
-associated with the directory structure.
+## Plugins
 
-Note, that in cases where the directory structure traversal moves to remote directories (that are actualized by local
-temporary directories), such remote directory structure enters the context hierarchy as a child of the directory in
-which remote was registered.
+Plugins are auto-discovered at startup but **only the App plugin runs automatically**. Every other plugin is opted in
+by the user with `ktor.app.register_plugin("<name>", **kwargs)`. A plugin may `assert_plugin("other")` during
+registration to declare a hard dependency; some plugins register their prerequisites themselves (e.g. `terragrunt`
+pulls in `terraform`, `eks` pulls in `awscli`).
 
-Also note, that context carries not just data by references to essential functions.
+The table below names the plugin (the string passed to `register_plugin`), its role, the external binary it needs (if
+any), and whether Kubernator downloads that binary automatically given a version.
 
-In pre-start and `.kubernator.py` scripts the context is fully available as a global variable `ktor`.
+| Plugin       | Role                                                             | Binary       | Auto-download    |
+|--------------|------------------------------------------------------------------|--------------|------------------|
+| `app`        | Directory traversal, plugin lifecycle, core `ktor` API.          | —            | —                |
+| `kubeconfig` | Sets/overrides the kubeconfig path used downstream.              | —            | —                |
+| `kubectl`    | Thin wrapper around `kubectl`.                                   | `kubectl`    | Yes              |
+| `awscli`     | Ensures an `aws` CLI is available; used by EKS.                  | `aws`        | Yes              |
+| `eks`        | Generates a kubeconfig for an AWS EKS cluster.                   | (via awscli) | —                |
+| `gke`        | Generates a kubeconfig for a Google GKE cluster.                 | `gcloud`     | No (must be on PATH) |
+| `minikube`   | Provisions and manages a local Minikube cluster.                 | `minikube`   | Yes              |
+| `terraform`  | Initialises Terraform and exposes its outputs as `ktor.tf`.      | `terraform`  | Yes              |
+| `terragrunt` | Same as above, but via Terragrunt (wraps Terraform).             | `terragrunt` | Yes              |
+| `k8s`        | Core Kubernetes plugin: loads, transforms, validates, applies.   | (API server) | —                |
+| `helm`       | Renders Helm charts (classic repo and OCI) into K8s resources.   | `helm`       | Yes              |
+| `istio`      | Installs and upgrades Istio via `istioctl`/IstioOperator.        | `istioctl`   | Yes              |
+| `templates`  | Registers and renders Jinja2 templates that emit K8s resources.  | —            | —                |
 
-### Plugins
+### App Plugin (`app`)
 
-#### Kubernator App Plugin
+The App plugin traverses the directory structure, exposes essential functions through the context, and runs
+`.kubernator.py` scripts. It is registered automatically and is the only plugin that is always active.
 
-The role of the Kubernator App Plugin is to traverse the directory structure, expose essential functions through context
-and to run Kubernator scripts.
+After each directory's `after_dir` stage the App plugin scans child directories, sorts them alphabetically, removes
+those matching any pattern in `context.app.excludes`, and re-orders the remainder to match the order of patterns in
+`context.app.includes`. For example, with children `/a/foo`, `/a/bal`, `/a/bar`, `/a/baz`, excludes `["f*"]`, and
+includes `["baz", "*"]`, the resulting queue is `/a/baz`, `/a/bal`, `/a/bar`.
 
-In the *After Directory Stage* Kubernator app scans the directories immediately available in the current, sorts them in
-the alphabetic order, excludes those matching any of the patterns in `context.app.excludes` and then queues up the
-remaining directories in the order the match the patterns in `context.app.includes`.
+Scripts can override this queue explicitly via `walk_local` and `walk_remote`.
 
-Thus, for a directory content `/a/foo`, `/a/bal`, `/a/bar`, `/a/baz`, excludes `f*`, and includes `baz` and `*`, the
-resulting queue of directories to traverse will be `/a/baz`, `/a/bal`, `/a/bar`.
-
-Notice, that user can further interfere with processing order of the directory queue by asking Kubernator to walk
-arbitrary paths, both local and remote.
-
-##### Context
+#### Context
 
 * `ktor.app.args`
-  > Namespace containing command line argument values
-* `ktor.app.walk_local(*paths: Union[Path, str, bytes])`
-  > Immediately schedules the paths to be traversed after the current directory by adding them to the queue
-  > Relative path is relative to the current directory
-* `ktor.app.walk_remote(repo, *path_prefixes: Union[Path, str, bytes])`
-  > Immediately schedules the path prefixes under the remote repo URL to be traversed after the current directory by
-  > adding them to the queue. Only Git URLs are currently supported.
-  > All absolute path prefixes are relativized based on the repository.
-* `ktor.app.repository_credentials_provider(func: Callable)`
-  > Sets a repository credentials provider function `func` that sets/overwrites credentials for URLs being specified by
-  > `walk_remote`. The callable `func` accepts a single argument containing a parsed URL in a form of tuple. The `func`
-  > is expected to return a tuple of three elements representing URL schema, username and password. If the value should
-  > not be changed it should be None. To convert from `git://repo.com/hello` to HTTPS authentication one should write
-  > a function returning `("https", "username", "password")`. The best utility is achieved by logic that allows running
-  > the plan both in CI and local environments using different authentication mechanics in different environments.
+  > Parsed command-line arguments.
+* `ktor.app.cwd`
+  > Current directory being processed (only defined inside per-directory stages).
+* `ktor.app.includes`, `ktor.app.excludes`
+  > Mutable `Globs` sets of patterns for sub-directory filtering. Resettable per-directory.
+* `ktor.app.default_includes`, `ktor.app.default_excludes`
+  > Defaults applied at the start of every directory.
+* `ktor.app.walk_local(*paths, keep_context=False)`
+  > Schedule local paths to be traversed after the current directory. Relative paths resolve against the current
+  > directory. With `keep_context=True` the new paths inherit the current context instead of a fresh child context.
+* `ktor.app.walk_remote(repo, *path_prefixes, keep_context=False)`
+  > Schedule paths inside a remote git repository. `repo` is a URL (optionally with `?ref=<branch|tag|sha>`). Absolute
+  > `path_prefixes` are resolved relative to the repository root.
+* `ktor.app.repository_credentials_provider(func)`
+  > Register a callable that adjusts credentials/scheme per URL. `func(parsed_url)` returns
+  > `(scheme, username, password)` (any element may be `None` to leave it unchanged). Useful for flipping `git://` to
+  > `https://` with a token in CI while leaving developer checkouts on SSH.
+* `ktor.app.register_plugin(name_or_class, **kwargs)`
+  > Register and initialise a plugin. `name` is the plugin's registered identifier (e.g. `"k8s"`, `"helm"`).
+* `ktor.app.assert_plugin(name, requester)`
+  > Assert that a prerequisite plugin is registered; raises if not.
+* `ktor.app.register_cleanup(handler)`
+  > Register an object with a `.cleanup()` method to be invoked on shutdown.
+* `ktor.app.run(cmd, stdout, stderr, **kwargs)`,
+  `ktor.app.run_capturing_out(cmd, stderr, **kwargs)`,
+  `ktor.app.run_passthrough_capturing(cmd, stderr, **kwargs)`
+  > Subprocess helpers with integrated logging.
+* `ktor.app.download_remote_file(logger, url, category, sub_category)`,
+  `ktor.app.load_remote_file(logger, url, file_type, category, sub_category)`
+  > HTTP download helpers with on-disk caching.
+* `ktor.app.jp(path)`
+  > JSONPath convenience helper bound to the core implementation.
 
-#### Terraform
+### Kubeconfig Plugin (`kubeconfig`)
 
-This is exclusively designed to pull the configuration options out of Terraform and to allow scripts and plugins to
-utilize that data.
+Centralises the kubeconfig path so that other plugins see a consistent value. Defaults to `$KUBECONFIG` or
+`~/.kube/config`. Plugins that generate their own kubeconfig (e.g. `minikube`, `eks`, `gke`) call `set(...)` on this
+plugin; consumers that need to react to changes register a notifier.
 
-##### Context
+#### Context
 
+* `ktor.kubeconfig.kubeconfig`
+  > Current kubeconfig path.
+* `ktor.kubeconfig.set(path)`
+  > Replace the kubeconfig path and notify all registered observers.
+* `ktor.kubeconfig.register_change_notifier(callable)`
+  > Callable is invoked whenever the path changes.
+
+### Kubectl Plugin (`kubectl`)
+
+Thin wrapper around `kubectl`. If the `k8s` plugin has determined the cluster's API version, `kubectl` auto-selects a
+matching binary; otherwise pass `version="1.30.0"` (or similar) to `register_plugin`. Kubernator downloads the binary
+from the official Kubernetes release mirror and caches it.
+
+#### Context
+
+* `ktor.kubectl.kubectl_file`, `ktor.kubectl.version`
+* `ktor.kubectl.stanza()`
+  > Base command list (kubectl binary + `--kubeconfig` if set). Extend with additional arguments.
+* `ktor.kubectl.run(*args, **kwargs)`
+  > Run `kubectl <args>`, streaming stdout to logs.
+* `ktor.kubectl.run_capturing(*args, **kwargs)`
+  > Run `kubectl <args>` and return captured stdout.
+* `ktor.kubectl.get(resource_type, resource_name, namespace=None)`
+  > Fetch a resource (or list of resources) as a Python dict/list.
+
+### AWS CLI Plugin (`awscli`)
+
+Ensures `aws` is available; downloads and extracts the official AWS CLI v2 bundle if necessary. Primarily consumed by
+the `eks` plugin but also usable directly from scripts that need AWS calls.
+
+#### Context
+
+* `ktor.awscli.aws_file`, `ktor.awscli.version`
+* `ktor.awscli.stanza(*args, output="json", region=None)`
+  > Build a ready-to-exec AWS CLI command list with `--output` and (optionally) `--region`.
+
+### EKS Plugin (`eks`)
+
+Uses `awscli` to generate a temporary kubeconfig for an EKS cluster and pushes it into the `kubeconfig` plugin. Register
+with `name=<cluster>` and `region=<aws-region>`. AWS credentials must be available in the environment.
+
+#### Context
+
+* `ktor.eks.kubeconfig`
+  > Path to the generated temporary kubeconfig.
+
+### GKE Plugin (`gke`)
+
+Equivalent for Google Kubernetes Engine. Relies on `gcloud` being installed on the host (not auto-downloaded). Register
+with `name`, `region`, and `project`.
+
+#### Context
+
+* `ktor.gke.kubeconfig`, `ktor.gke.name`, `ktor.gke.region`, `ktor.gke.project`, `ktor.gke.gcloud_file`
+
+### Minikube Plugin (`minikube`)
+
+Drives a local Minikube cluster for development or integration testing. Downloads the `minikube` binary if necessary,
+starts a profile, and publishes the generated kubeconfig to the `kubeconfig` plugin. Typical registration:
+
+```python
+ktor.app.register_plugin("minikube",
+                         k8s_version="1.30.0",
+                         profile="my-dev",
+                         start_fresh=True,
+                         keep_running=False,
+                         driver="docker",
+                         nodes=1)
+```
+
+#### Context
+
+* `ktor.minikube.version`, `ktor.minikube.k8s_version`, `ktor.minikube.profile`, `ktor.minikube.kubeconfig`
+* `ktor.minikube.start_fresh`, `ktor.minikube.keep_running`, `ktor.minikube.nodes`, `ktor.minikube.driver`,
+  `ktor.minikube.cpus`, `ktor.minikube.extra_args`, `ktor.minikube.extra_addons`
+* `ktor.minikube.cmd(*args)` / `ktor.minikube.cmd_out(*args)`
+  > Run a `minikube` subcommand, optionally capturing output.
+
+### Terraform Plugin (`terraform`)
+
+Runs `terraform init` + `terraform output -json` in the current directory and merges the outputs into `ktor.tf`, making
+infrastructure values available to scripts. Pass `version="1.5.7"` to pin a Terraform version; Kubernator will
+download the matching binary from HashiCorp.
+
+#### Context
+
+* `ktor.terraform.version`, `ktor.terraform.tf_file`, `ktor.terraform.stanza()`
 * `ktor.tf`
-  > A dictionary containing the values from Terraform output
+  > Dictionary populated with Terraform outputs (merged across directories that invoked the plugin).
 
-#### Kops
+### Terragrunt Plugin (`terragrunt`)
 
-##### Context
+Same shape as the Terraform plugin but invokes `terragrunt`. Registers `terraform` implicitly. Pass `version=...` to
+pin a Terragrunt version; the binary is downloaded from GitHub releases.
 
-#### Kubernetes
+#### Context
 
-##### Context
+* `ktor.terragrunt.version`, `ktor.terragrunt.tg_file`, `ktor.terragrunt.stanza()`
+* `ktor.tf` (shared with the Terraform plugin)
 
-#### Helm
+### Kubernetes Plugin (`k8s`)
 
-##### Context
+The core of Kubernator. Connects to the cluster, resolves its API version, picks a compatible client library (from the
+pre-cache or downloading on demand), and collects manifests from YAML files under each traversed directory. During the
+`apply` stage it computes per-resource diffs, honours CRD schemas, retries on conflicts, and performs server-side or
+client-side field validation according to configuration.
 
-#### Templates
+File discovery uses globs `*.yaml` / `*.yml` by default, configurable per-directory via `ktor.k8s.includes` and
+`ktor.k8s.excludes`.
 
-##### Context
+#### Context
+
+* `ktor.k8s.default_includes`, `ktor.k8s.default_excludes`, `ktor.k8s.includes`, `ktor.k8s.excludes`
+* `ktor.k8s.add_resources(manifests, source=None)` — register a list/iterable of manifests directly.
+* `ktor.k8s.load_resources(path, file_type)` — load manifests from a local file (`"yaml"`/`"json"`).
+* `ktor.k8s.load_remote_resources(url, file_type, file_category=None)` — load from a URL with caching.
+* `ktor.k8s.load_crds(path, file_type)` / `ktor.k8s.load_remote_crds(url, file_type, file_category=None)` — register
+  CRDs separately from consuming resources so their schemas are known during validation.
+* `ktor.k8s.import_cluster_crds()` — pull CRDs that are already installed on the target cluster.
+* `ktor.k8s.add_transformer(func)` / `ktor.k8s.remove_transformer(func)` — register a function
+  `func(resources, resource)` that may mutate manifests before apply.
+* `ktor.k8s.add_validator(func)` — register a validator run after transformation.
+* `ktor.k8s.add_manifest_patcher(func)` — register a low-level manifest patcher.
+* `ktor.k8s.get_api_versions()` — set of `(group, version)` tuples in use.
+* `ktor.k8s.create_resource(manifest)` — wrap a manifest as a `K8SResource` without registering it.
+* `ktor.k8s.client`, `ktor.k8s.server_version`, `ktor.k8s.server_git_version` — access the underlying Kubernetes client.
+* `ktor.k8s.field_validation` (`"Ignore"`/`"Warn"`/`"Strict"`),
+  `ktor.k8s.field_validation_warn_fatal`,
+  `ktor.k8s.disable_client_patches`,
+  `ktor.k8s.conflict_retry_delay` — behavioural knobs, all settable at `register_plugin` time.
+* `ktor.k8s.patch_field_excludes`, `ktor.k8s.immutable_changes` — advanced patch/diff controls.
+
+### Helm Plugin (`helm`)
+
+Renders Helm charts as Kubernetes resources and feeds them into the `k8s` pipeline. Files named `*.helm.yaml` /
+`*.helm.yml` declare releases. Both classic HTTP chart repositories and OCI registries are supported. Register with
+`version=...` to pin a Helm version (auto-downloaded) and optionally `check_chart_versions=True` to fail the build if a
+pinned chart version is not the latest available in its repository.
+
+Example `foo.helm.yaml`:
+
+```yaml
+repository: https://kubernetes-sigs.github.io/metrics-server
+chart: metrics-server
+version: 3.12.2
+name: metrics-server
+namespace: kube-system
+```
+
+OCI form:
+
+```yaml
+chart: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+name: arc
+namespace: arc-systems
+```
+
+#### Context
+
+* `ktor.helm.default_includes`, `ktor.helm.default_excludes`, `ktor.helm.includes`, `ktor.helm.excludes`
+* `ktor.helm.helm_file`, `ktor.helm.stanza()`
+* `ktor.helm.namespace_transformer` — if true, namespaced resources rendered without a `namespace:` receive the release
+  namespace automatically.
+* `ktor.helm.check_chart_versions`
+* `ktor.helm.add_helm(chart, name, namespace, repository=None, version=None, values=None, values_file=None,
+  include_crds=False)` — programmatic equivalent of a `*.helm.yaml` file.
+* `ktor.helm.add_helm_template(template)` — add a release declaration as a dict.
+
+### Istio Plugin (`istio`)
+
+Installs and upgrades Istio using `istioctl` against an `IstioOperator` resource. Files matching `*.istio.yaml` /
+`*.istio.yml` are treated as IstioOperator manifests. Register with `version=...` to pin `istioctl`.
+
+#### Context
+
+* `ktor.istio.default_includes`, `ktor.istio.default_excludes`, `ktor.istio.includes`, `ktor.istio.excludes`
+* `ktor.istio.istioctl_file`, `ktor.istio.stanza()`
+* `ktor.istio.test()` — run `istioctl version`, returning `(version_tuple, full_output_dict)`.
+
+### Templates Plugin (`templates`)
+
+Defines Jinja2 templates and renders them into Kubernetes resources. The plugin uses custom delimiters `{${ ... }$}`
+for expressions and `{%$ ... %}` for blocks so that templates remain valid-looking YAML.
+
+Files ending `*.tmpl.yaml` / `*.tmpl.yml` are processed in two modes:
+
+- a top-level `define:` block registers named templates;
+- a top-level `apply:` block renders named templates with supplied values and feeds the results into `k8s`.
+
+Example `define.tmpl.yaml`:
+
+```yaml
+define:
+  - name: test
+    path: .test.tmpl.yaml
+```
+
+Example `.test.tmpl.yaml` (referenced above):
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {${ values.name }$}
+```
+
+Example `apply.tmpl.yaml`:
+
+```yaml
+apply:
+  - name: test
+    values:
+      name: ns1
+```
+
+Templates have access to the full context and to extra filters for JSON/YAML output (`to_json`, `to_yaml`,
+`to_yaml_str_block`, `to_json_yaml_str_block`).
+
+#### Context
+
+* `ktor.templates.default_includes`, `ktor.templates.default_excludes`, `ktor.templates.includes`,
+  `ktor.templates.excludes`
+* `ktor.templates.render_template(name, source, values=())` — render a registered template, returning the rendered
+  string.
+* `ktor.templates.apply_template(name, values=(), source=None)` — render and register the result as K8s manifests.
 
 ## Examples
 
-### Adding Remote Directory
+### A minimal Minikube + k8s pipeline
+
+A `.kubernator.py` at the root of a directory containing YAML manifests:
+
+```python
+import os
+
+ktor.app.register_plugin("minikube",
+                         k8s_version=os.environ["K8S_VERSION"],
+                         profile="dev",
+                         start_fresh=True,
+                         keep_running=False)
+ktor.app.register_plugin("k8s")
+```
+
+Run a dry-run:
+
+```shell
+$ kubernator -p ./manifests
+```
+
+Apply for real:
+
+```shell
+$ kubernator -p ./manifests --yes apply
+```
+
+### Combining plugins
+
+The `full_smoke` integration test illustrates a realistic mix:
+
+```python
+import os
+
+ktor.app.register_plugin("minikube", k8s_version=os.environ["K8S_VERSION"],
+                         start_fresh=bool(os.environ["START_FRESH"]),
+                         keep_running=bool(os.environ["KEEP_RUNNING"]),
+                         profile="full-smoke")
+ktor.app.register_plugin("awscli")
+ktor.app.register_plugin("terraform", version="1.5.7")
+ktor.app.register_plugin("terragrunt", version="0.48.0")
+ktor.app.register_plugin("k8s")
+ktor.app.register_plugin("kubectl")
+ktor.app.register_plugin("istio", version=os.environ["ISTIO_VERSION"])
+ktor.app.register_plugin("helm", version="3.13.2")
+ktor.app.register_plugin("templates")
+```
+
+### Adding a remote directory
 
 ```python
 ktor.app.repository_credentials_provider(lambda r: ("ssh", "git", None))
 ktor.app.walk_remote("git://repo.example.com/org/project?ref=dev", "/project")
 ```
 
-### Adding Local Directory
+### Adding a local directory
 
 ```python
 ktor.app.walk_local("/home/username/local-dir")
 ```
 
-### Using Transformers
+### Using a transformer to enforce policy
 
 ```python
 def remove_replicas(resources, r: "K8SResource"):
@@ -199,4 +554,17 @@ def remove_replicas(resources, r: "K8SResource"):
 
 
 ktor.k8s.add_transformer(remove_replicas)
+```
+
+### Importing CRDs already installed on the cluster
+
+```python
+ktor.app.register_plugin("k8s")
+ktor.k8s.import_cluster_crds()
+```
+
+### Loading CRDs from a sibling directory before consuming them
+
+```python
+ktor.k8s.load_crds(ktor.app.cwd / ".." / "crd" / "manifests.yaml", "yaml")
 ```
