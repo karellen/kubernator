@@ -105,7 +105,7 @@ $ pip install kubernator
 $ kubernator --version
 ```
 
-Python 3.9 through 3.14 are supported. Some plugins (`awscli`, `eks`, `gke`) may require additional volume mounts or
+Python 3.10 through 3.14 are supported. Some plugins (`awscli`, `eks`, `gke`) may require additional volume mounts or
 environment variables for credentials and external tooling.
 
 ## Command Line Interface
