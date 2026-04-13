@@ -45,11 +45,9 @@ def _preserve_pyo3(modules):
 
 
 class IntegrationTestSupport(unittest.TestCase):
-    K8S_TEST_VERSIONS = ["1.20.15", "1.21.14", "1.22.17",
-                         "1.23.17", "1.24.17", "1.25.16",
-                         "1.26.15", "1.27.16", "1.28.15",
-                         "1.29.15", "1.30.14", "1.31.12",
-                         "1.32.8", "1.33.4", "1.34.0"]
+    K8S_TEST_VERSIONS = ["1.29.15", "1.30.14", "1.31.14",
+                         "1.32.13", "1.33.10", "1.34.6",
+                         "1.35.3"]
 
     def load_json_logs(self, log_file):
         decoder = json.JSONDecoder()

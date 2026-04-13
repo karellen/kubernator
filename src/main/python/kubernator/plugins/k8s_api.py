@@ -406,7 +406,7 @@ class K8SResource:
                   }
 
         # `and not self.rdef.custom` to be removed after solving https://github.com/kubernetes-client/gen/issues/259
-        if self._k8s_client_version[0] > 22 and (self._k8s_field_validation_patched or not self.rdef.custom):
+        if self._k8s_field_validation_patched or not self.rdef.custom:
             kwargs["field_validation"] = self._k8s_field_validation
         if rdef.namespaced:
             kwargs["namespace"] = self.namespace
@@ -419,15 +419,13 @@ class K8SResource:
     def patch(self, json_patch, *, patch_type: K8SResourcePatchType, force=False, dry_run=True):
         rdef = self.rdef
         kwargs = {"name": self.name,
-                  "body": json_patch
-                  if patch_type != K8SResourcePatchType.SERVER_SIDE_PATCH or self._k8s_client_version[0] > 24
-                  else json.dumps(json_patch),
+                  "body": json_patch,
                   "_preload_content": False,
                   "field_manager": "kubernator",
                   }
 
         # `and not self.rdef.custom` to be removed after solving https://github.com/kubernetes-client/gen/issues/259
-        if self._k8s_client_version[0] > 22 and (self._k8s_field_validation_patched or not self.rdef.custom):
+        if self._k8s_field_validation_patched or not self.rdef.custom:
             kwargs["field_validation"] = self._k8s_field_validation
         if patch_type == K8SResourcePatchType.SERVER_SIDE_PATCH:
             kwargs["force"] = force
