@@ -23,10 +23,15 @@ jobs:
     name: Discover missing versions
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     outputs:
       versions: ${{ steps.diff.outputs.versions }}
       count: ${{ steps.diff.outputs.count }}
     steps:
+      - name: Configure GitHub auth for git
+        run: gh auth setup-git
+
       - name: List upstream K8s tags
         id: upstream
         run: |
@@ -89,7 +94,12 @@ jobs:
         version: ${{ fromJSON(needs.discover.outputs.versions) }}
         arch: [amd64, arm64]
     runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Configure GitHub auth for git
+        run: gh auth setup-git
+
       - name: Install kind
         run: |
           set -euo pipefail
