@@ -15,10 +15,15 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 #
+import http.client
 import logging
 import os
+import socket
+import ssl
 import tempfile
+import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -328,6 +333,7 @@ class KindPlugin(KubernatorPlugin):
 
     def kind_start(self):
         kind = self.context.kind
+        resumed = False
         if self._cluster_exists(kind.profile):
             stopped = self._cluster_containers(kind.profile, running=False)
             running = self._cluster_containers(kind.profile, running=True)
@@ -335,10 +341,12 @@ class KindPlugin(KubernatorPlugin):
                 logger.info("Starting %d stopped container(s) for kind cluster %r",
                             len(stopped), kind.profile)
                 self._docker("start", *stopped)
+                resumed = True
             elif stopped and running:
                 logger.info("Resuming %d stopped container(s) for kind cluster %r",
                             len(stopped), kind.profile)
                 self._docker("start", *stopped)
+                resumed = True
             else:
                 logger.info("Kind cluster %r is already running", kind.profile)
         else:
@@ -346,8 +354,47 @@ class KindPlugin(KubernatorPlugin):
 
         self._export_kubeconfig()
 
+        # On resume, kind's --wait flag did not run; static pods take a few
+        # seconds to become reachable. Poll /readyz until the apiserver answers
+        # so downstream plugins don't see SSL handshake failures.
+        if resumed:
+            self._wait_for_apiserver()
+
         context = self.context
         context.app.register_plugin("kubectl", version=kind.k8s_version)
+
+    def _wait_for_apiserver(self, timeout=120):
+        with open(self.context.kind.kubeconfig) as f:
+            cfg = yaml.safe_load(f)
+        server_url = cfg["clusters"][0]["cluster"]["server"]
+        parsed = urlparse(server_url)
+        ssl_ctx = ssl._create_unverified_context()
+
+        logger.info("Waiting up to %ds for apiserver at %s to be ready",
+                    timeout, server_url)
+        deadline = time.monotonic() + timeout
+        last_err = None
+        while time.monotonic() < deadline:
+            try:
+                conn = http.client.HTTPSConnection(parsed.hostname, parsed.port,
+                                                   context=ssl_ctx, timeout=5)
+                try:
+                    conn.request("GET", "/readyz")
+                    resp = conn.getresponse()
+                    status = resp.status
+                    resp.read()
+                finally:
+                    conn.close()
+                if status == 200:
+                    logger.info("Apiserver at %s is ready", server_url)
+                    return
+                last_err = f"HTTP {status}"
+            except (OSError, socket.error, ssl.SSLError,
+                    http.client.HTTPException) as e:
+                last_err = f"{type(e).__name__}: {e}"
+            time.sleep(2)
+        raise RuntimeError(
+            f"Apiserver at {server_url} did not become ready within {timeout}s: {last_err}")
 
     def handle_start(self):
         kind = self.context.kind
