@@ -5,6 +5,11 @@ on:
     - cron: '17 * * * *'
   workflow_dispatch:
 
+# Hard guard: never run on pull_request (or any other trigger we haven't
+# explicitly opted into). If a future change adds pull_request to `on:`,
+# this condition prevents it from publishing to GHCR.
+run-name: kindest-node-release (${{ github.event_name }})
+
 permissions:
   packages: write
   contents: read
@@ -16,6 +21,7 @@ env:
 jobs:
   discover:
     name: Discover missing versions
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       versions: ${{ steps.diff.outputs.versions }}
@@ -74,7 +80,9 @@ jobs:
   build:
     name: Build ${{ matrix.version }} (${{ matrix.arch }})
     needs: discover
-    if: needs.discover.outputs.count != '0'
+    if: |
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && needs.discover.outputs.count != '0'
     strategy:
       fail-fast: false
       matrix:
@@ -116,7 +124,9 @@ jobs:
   manifest:
     name: Multi-arch manifest ${{ matrix.version }}
     needs: [discover, build]
-    if: needs.discover.outputs.count != '0'
+    if: |
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && needs.discover.outputs.count != '0'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
