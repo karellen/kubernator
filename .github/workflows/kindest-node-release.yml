@@ -1,0 +1,139 @@
+name: kindest-node-release
+on:
+  schedule:
+    # Hourly at :17 to avoid the top-of-hour thundering herd.
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  packages: write
+  contents: read
+
+env:
+  REGISTRY: ghcr.io/karellen/kindest-node
+  KIND_FLOOR_MINOR: 29
+
+jobs:
+  discover:
+    name: Discover missing versions
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.diff.outputs.versions }}
+      count: ${{ steps.diff.outputs.count }}
+    steps:
+      - name: List upstream K8s tags
+        id: upstream
+        run: |
+          set -euo pipefail
+          git ls-remote --tags --refs https://github.com/kubernetes/kubernetes 'v1.*' \
+            | awk '{print $2}' \
+            | sed 's|^refs/tags/v||' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | awk -F. -v floor="${KIND_FLOOR_MINOR}" '$1 == 1 && $2 >= floor' \
+            | sort -u > upstream.txt
+          echo "upstream count: $(wc -l < upstream.txt)"
+
+      - name: List existing GHCR tags
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          : > existing.txt
+          # Try org first, fall back to user. If package doesn't exist yet, proceed with empty list.
+          for owner_kind in orgs users; do
+            if gh api -H "Accept: application/vnd.github+json" \
+                 "/${owner_kind}/karellen/packages/container/kindest-node/versions" \
+                 --paginate --jq '.[].metadata.container.tags[]' 2>/dev/null \
+               | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+               | sed 's/^v//' \
+               | sort -u > existing.txt; then
+              break
+            fi
+          done
+          echo "existing count: $(wc -l < existing.txt)"
+
+      - name: Compute diff
+        id: diff
+        run: |
+          set -euo pipefail
+          comm -23 upstream.txt existing.txt > todo.txt
+          count=$(wc -l < todo.txt | tr -d ' ')
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          if [[ "${count}" == "0" ]]; then
+            echo "versions=[]" >> "$GITHUB_OUTPUT"
+            echo "Nothing to build."
+            exit 0
+          fi
+          # Emit JSON array for matrix.
+          jq -R . < todo.txt | jq -sc . > versions.json
+          echo "versions=$(cat versions.json)" >> "$GITHUB_OUTPUT"
+          echo "Versions to build:"
+          cat todo.txt
+
+  build:
+    name: Build ${{ matrix.version }} (${{ matrix.arch }})
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.discover.outputs.versions) }}
+        arch: [amd64, arm64]
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
+    steps:
+      - name: Install kind
+        run: |
+          set -euo pipefail
+          KIND_VERSION=$(git ls-remote --tags --refs https://github.com/kubernetes-sigs/kind 'v*' \
+            | awk '{print $2}' \
+            | sed 's|^refs/tags/v||' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -1)
+          echo "Using kind v${KIND_VERSION}"
+          curl -fsSL -o /usr/local/bin/kind \
+            "https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-linux-${{ matrix.arch }}"
+          chmod +x /usr/local/bin/kind
+          kind version
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build kindest/node v${{ matrix.version }} (${{ matrix.arch }})
+        run: |
+          set -euo pipefail
+          kind build node-image --image "${REGISTRY}:v${{ matrix.version }}-${{ matrix.arch }}" \
+            --type release "v${{ matrix.version }}"
+
+      - name: Push
+        run: |
+          docker push "${REGISTRY}:v${{ matrix.version }}-${{ matrix.arch }}"
+
+  manifest:
+    name: Multi-arch manifest ${{ matrix.version }}
+    needs: [discover, build]
+    if: needs.discover.outputs.count != '0'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.discover.outputs.versions) }}
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            -t "${REGISTRY}:v${{ matrix.version }}" \
+            "${REGISTRY}:v${{ matrix.version }}-amd64" \
+            "${REGISTRY}:v${{ matrix.version }}-arm64"
