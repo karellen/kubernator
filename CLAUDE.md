@@ -32,7 +32,7 @@ PyBuilder per global instructions. Key bits specific to this repo:
 - `coverage_break_build = False` and `cram_fail_if_no_tests = False` — build does not
   fail on coverage thresholds or empty cram dirs. Do not assume failures surface there.
 - Integration tests inherit the environment (`integrationtest_inherit_environment = True`).
-- Python 3.9–3.14 supported; CI matrix runs all of them on `ubuntu-latest`. Deployment
+- Python 3.10–3.14 supported; CI matrix runs all of them on `ubuntu-latest`. Deployment
   (PyPI + GHCR) happens only from `push` events on Python 3.13 / Linux.
 - Docker image is built by the custom `publish` task in `build.py` (not `distutils`):
   tags `:<dist_version>` always, plus `:latest` only on non-dev builds. `upload` task

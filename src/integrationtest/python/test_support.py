@@ -30,6 +30,19 @@ from runpy import run_module  # noqa: E402
 
 __all__ = ["unittest", "IntegrationTestSupport"]
 
+# PyO3-backed extensions refuse to be initialized more than once per interpreter
+# process. Clearing `sys.modules` between tests (below) causes the next import to
+# re-run the extension's module init, which raises
+# `ImportError: PyO3 modules compiled for CPython 3.8 or older may only be
+# initialized once per interpreter process`. Keep such packages resident across
+# the reset so subsequent tests find them already imported.
+_PYO3_PRESERVE_PREFIXES = ("cryptography",)
+
+
+def _preserve_pyo3(modules):
+    return {name: mod for name, mod in modules.items()
+            if any(name == p or name.startswith(p + ".") for p in _PYO3_PRESERVE_PREFIXES)}
+
 
 class IntegrationTestSupport(unittest.TestCase):
     K8S_TEST_VERSIONS = ["1.20.15", "1.21.14", "1.22.17",
@@ -74,8 +87,10 @@ class IntegrationTestSupport(unittest.TestCase):
             del sys.argv[:]
             sys.argv.extend(old_argv)
 
+            preserved = _preserve_pyo3(sys.modules)
             sys.modules.clear()
             sys.modules.update(old_modules)
+            sys.modules.update(preserved)
 
             del sys.meta_path[:]
             sys.meta_path.extend(old_meta_path)
