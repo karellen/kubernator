@@ -20,7 +20,6 @@ from test_support import IntegrationTestSupport, unittest
 unittest  # noqa
 # Above import must be first
 
-import json  # noqa: E402
 import os  # noqa: E402
 import subprocess  # noqa: E402
 from pathlib import Path  # noqa: E402
