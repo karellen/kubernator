@@ -117,7 +117,7 @@ jobs:
           "$HOME/bin/kind" version
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -146,7 +146,7 @@ jobs:
         version: ${{ fromJSON(needs.discover.outputs.versions) }}
     steps:
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
