@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pause
+  namespace: default
+  labels:
+    app: pause
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pause
+  template:
+    metadata:
+      labels:
+        app: pause
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10

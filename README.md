@@ -190,6 +190,7 @@ any), and whether Kubernator downloads that binary automatically given a version
 | `eks`        | Generates a kubeconfig for an AWS EKS cluster.                   | (via awscli) | —                |
 | `gke`        | Generates a kubeconfig for a Google GKE cluster.                 | `gcloud`     | No (must be on PATH) |
 | `minikube`   | Provisions and manages a local Minikube cluster.                 | `minikube`   | Yes              |
+| `kind`       | Provisions and manages a local kind (Kubernetes IN Docker) cluster. | `kind`    | Yes              |
 | `terraform`  | Initialises Terraform and exposes its outputs as `ktor.tf`.      | `terraform`  | Yes              |
 | `terragrunt` | Same as above, but via Terragrunt (wraps Terraform).             | `terragrunt` | Yes              |
 | `k8s`        | Core Kubernetes plugin: loads, transforms, validates, applies.   | (API server) | —                |
@@ -330,6 +331,43 @@ ktor.app.register_plugin("minikube",
   `ktor.minikube.cpus`, `ktor.minikube.extra_args`, `ktor.minikube.extra_addons`
 * `ktor.minikube.cmd(*args)` / `ktor.minikube.cmd_out(*args)`
   > Run a `minikube` subcommand, optionally capturing output.
+
+### Kind Plugin (`kind`)
+
+Drives a local kind cluster (Kubernetes IN Docker — upstream kubeadm binaries running inside Docker containers, with
+real etcd and separate control-plane components). Downloads the `kind` binary, creates a cluster, and publishes the
+exported kubeconfig to the `kubeconfig` plugin. Unlike Minikube, kind does not ship bundled addons such as CSI hostpath
+or LoadBalancer controllers — install those separately in your `.kubernator.py` if you need them, the same way you
+would on any upstream Kubernetes cluster.
+
+```python
+ktor.app.register_plugin("kind",
+                         k8s_version="1.34.0",
+                         profile="my-dev",
+                         start_fresh=True,
+                         keep_running=False,
+                         nodes=5,
+                         control_plane_nodes=3)
+```
+
+Node images default to `ghcr.io/karellen/kindest-node:v<k8s_version>` (pre-built by the `kindest-node-release` workflow
+in this repo for every K8s release ≥ 1.29.0, multi-arch amd64/arm64). Override with `node_image_registry="kindest/node"`
+to pull from upstream Docker Hub, or pass `node_image=...` for a specific image. Lifecycle maps `start`/`stop` onto
+`docker start` / `docker stop` on the node containers (kind has no native start/stop subcommands); `keep_running=False`
+stops containers without deleting them, and `start_fresh=True` deletes and recreates the cluster.
+
+Multi-node HA is supported directly: `control_plane_nodes >= 2` causes kind to auto-spawn an haproxy load-balancer
+container in front of the API servers. Additional knobs: `extra_port_mappings`, `feature_gates`, `runtime_config`, or
+raw `config` YAML override.
+
+#### Context
+
+* `ktor.kind.version`, `ktor.kind.k8s_version`, `ktor.kind.profile`, `ktor.kind.kubeconfig`
+* `ktor.kind.node_image`, `ktor.kind.node_image_registry`
+* `ktor.kind.nodes`, `ktor.kind.control_plane_nodes`, `ktor.kind.provider` (`docker` or `podman`)
+* `ktor.kind.start_fresh`, `ktor.kind.keep_running`
+* `ktor.kind.cmd(*args)` / `ktor.kind.cmd_out(*args)`
+  > Run a `kind` subcommand, optionally capturing output.
 
 ### Terraform Plugin (`terraform`)
 
