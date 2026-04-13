@@ -32,9 +32,7 @@ class Issue35Test(IntegrationTestSupport):
         crd_dir = issue_dir / "crd"
         test_dir = issue_dir / "test"
 
-        for k8s_version in ["1.20.15", "1.23.17", "1.25.16", "1.28.4"]:
-            k8s_minor = int(k8s_version[2:4])
-
+        for k8s_version in (self.K8S_TEST_VERSIONS[0], self.K8S_TEST_VERSIONS[-1]):
             for phase, validation in enumerate(("Ignore", "Warn", "Strict")):
                 for warn_fatal in (True, False):
                     with self.subTest(k8s_version=k8s_version,
@@ -67,8 +65,7 @@ class Issue35Test(IntegrationTestSupport):
                                 except AssertionError:
                                     logs = self.load_json_logs(log_file)
                                     if ((not warn_fatal and validation == "Warn") or
-                                            validation == "Ignore" or
-                                            k8s_minor < 25):
+                                            validation == "Ignore"):
                                         raise
 
                             validation_msg_found = False
@@ -77,7 +74,7 @@ class Issue35Test(IntegrationTestSupport):
                                     validation_msg_found = True
                                     break
 
-                            if k8s_minor < 24 or validation == "Ignore":
+                            if validation == "Ignore":
                                 self.assertFalse(validation_msg_found)
                             elif validation in ("Warn", "Strict"):
                                 self.assertTrue(validation_msg_found)

@@ -52,7 +52,6 @@ from yaml import MarkedYAMLError
 
 from kubernator._json_path import jp  # noqa: F401
 from kubernator._k8s_client_patches import (URLLIB_HEADERS_PATCH,
-                                            CUSTOM_OBJECT_PATCH_23,
                                             CUSTOM_OBJECT_PATCH_25)
 
 _CACHE_HEADER_TRANSLATION = {"etag": "if-none-match",
@@ -884,7 +883,7 @@ def install_python_k8s_client(run, package_major, logger, logger_stdout, logger_
                                              fallback=True)
 
         for patch_text, target_file, skip_if_found, min_version, max_version, name in (
-                URLLIB_HEADERS_PATCH, CUSTOM_OBJECT_PATCH_23, CUSTOM_OBJECT_PATCH_25):
+                URLLIB_HEADERS_PATCH, CUSTOM_OBJECT_PATCH_25):
             patch_target = package_major_dir / target_file
             logger.info("Applying patch %s to %s...", name, patch_target)
             if min_version and int(package_major) < min_version:
