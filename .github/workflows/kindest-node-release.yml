@@ -99,10 +99,12 @@ jobs:
             | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
             | sort -V | tail -1)
           echo "Using kind v${KIND_VERSION}"
-          curl -fsSL -o /usr/local/bin/kind \
+          mkdir -p "$HOME/bin"
+          curl -fsSL -o "$HOME/bin/kind" \
             "https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-linux-${{ matrix.arch }}"
-          chmod +x /usr/local/bin/kind
-          kind version
+          chmod +x "$HOME/bin/kind"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/kind" version
 
       - name: Login to GHCR
         uses: docker/login-action@v3
