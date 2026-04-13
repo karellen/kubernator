@@ -17,8 +17,8 @@ PyBuilder project — standard `src/main/python`, `src/unittest/python`,
   - `api.py` — plugin-facing API (`ktor.*`), context hierarchy, Jinja env, JSON schema,
     diff-match-patch, HTTP, etc.
   - `merge.py`, `_json_path.py`, `_k8s_client_patches.py`, `proc.py` — internals
-  - `plugins/` — `awscli`, `eks`, `gke`, `helm`, `istio`, `k8s`, `k8s_api`, `kubeconfig`,
-    `kubectl`, `minikube`, `template`, `terraform`, `terragrunt`
+  - `plugins/` — `awscli`, `eks`, `gke`, `helm`, `istio`, `k8s`, `k8s_api`, `kind`,
+    `kubeconfig`, `kubectl`, `minikube`, `template`, `terraform`, `terragrunt`
 - `src/unittest/python/` — pytest-style unit tests (`*_tests.py`)
 - `src/integrationtest/python/` — cram-style integration tests, many organized by
   `issue_NN/` reproducing specific bugs
