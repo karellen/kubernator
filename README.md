@@ -191,6 +191,7 @@ any), and whether Kubernator downloads that binary automatically given a version
 | `gke`        | Generates a kubeconfig for a Google GKE cluster.                 | `gcloud`     | No (must be on PATH) |
 | `minikube`   | Provisions and manages a local Minikube cluster.                 | `minikube`   | Yes              |
 | `kind`       | Provisions and manages a local kind (Kubernetes IN Docker) cluster. | `kind`    | Yes              |
+| `k3d`        | Provisions and manages a local k3d (k3s in Docker) cluster.      | `k3d`        | Yes              |
 | `terraform`  | Initialises Terraform and exposes its outputs as `ktor.tf`.      | `terraform`  | Yes              |
 | `terragrunt` | Same as above, but via Terragrunt (wraps Terraform).             | `terragrunt` | Yes              |
 | `k8s`        | Core Kubernetes plugin: loads, transforms, validates, applies.   | (API server) | —                |
@@ -249,7 +250,7 @@ Scripts can override this queue explicitly via `walk_local` and `walk_remote`.
 ### Kubeconfig Plugin (`kubeconfig`)
 
 Centralises the kubeconfig path so that other plugins see a consistent value. Defaults to `$KUBECONFIG` or
-`~/.kube/config`. Plugins that generate their own kubeconfig (e.g. `minikube`, `eks`, `gke`) call `set(...)` on this
+`~/.kube/config`. Plugins that generate their own kubeconfig (e.g. `minikube`, `kind`, `k3d`, `eks`, `gke`) call `set(...)` on this
 plugin; consumers that need to react to changes register a notifier.
 
 #### Context
@@ -368,6 +369,47 @@ raw `config` YAML override.
 * `ktor.kind.start_fresh`, `ktor.kind.keep_running`
 * `ktor.kind.cmd(*args)` / `ktor.kind.cmd_out(*args)`
   > Run a `kind` subcommand, optionally capturing output.
+
+### k3d Plugin (`k3d`)
+
+Drives a local [k3d](https://k3d.io) cluster (k3s in Docker — Rancher's lightweight Kubernetes distribution running
+inside Docker containers). Downloads the `k3d` binary, creates a cluster, and publishes the exported kubeconfig to the
+`kubeconfig` plugin. Like kind, k3d does not ship the same addon set as Minikube — install CSI drivers, ingress
+controllers, etc. yourself in your `.kubernator.py` if needed. K3s does ship with Traefik, ServiceLB, and a
+local-path-provisioner enabled by default; pass `k3s_server_args=["--disable=traefik", ...]` to opt out.
+
+```python
+ktor.app.register_plugin("k3d",
+                         k8s_version="1.34.6",
+                         profile="my-dev",
+                         start_fresh=True,
+                         keep_running=False,
+                         nodes=5,
+                         control_plane_nodes=3)
+```
+
+Node images default to `rancher/k3s:v<k8s_version>-k3s1` (multi-arch amd64/arm64, published per K8s patch by Rancher).
+Override the suffix via `node_image_suffix="-k3s2"` when Rancher rebuilds for a given K8s version, or pass
+`node_image=...` for a fully custom image. Lifecycle uses k3d's native `cluster start` / `cluster stop` subcommands
+(no `docker start/stop` plumbing needed); `keep_running=False` stops the cluster without deleting it, and
+`start_fresh=True` deletes and recreates the cluster.
+
+Multi-server HA is supported directly: `control_plane_nodes >= 2` causes k3d to auto-spawn a `loadbalancer`-role
+container in front of the API servers. Additional knobs: `extra_port_mappings` (rendered onto the loadbalancer node),
+`feature_gates` and `runtime_config` (translated into `--kube-apiserver-arg=...` server-side flags),
+`k3s_server_args` / `k3s_agent_args` (raw k3s args targeted at server / agent nodes), or a raw `config` YAML override
+(passed to `--config` verbatim — schema is `k3d.io/v1alpha5` `Simple`).
+
+Only the Docker provider is supported; k3d's experimental podman path is not offered.
+
+#### Context
+
+* `ktor.k3d.version`, `ktor.k3d.k8s_version`, `ktor.k3d.profile`, `ktor.k3d.kubeconfig`
+* `ktor.k3d.node_image`, `ktor.k3d.node_image_registry`, `ktor.k3d.node_image_suffix`
+* `ktor.k3d.nodes`, `ktor.k3d.control_plane_nodes`, `ktor.k3d.provider` (`docker`)
+* `ktor.k3d.start_fresh`, `ktor.k3d.keep_running`
+* `ktor.k3d.cmd(*args)` / `ktor.k3d.cmd_out(*args)`
+  > Run a `k3d` subcommand, optionally capturing output.
 
 ### Terraform Plugin (`terraform`)
 
