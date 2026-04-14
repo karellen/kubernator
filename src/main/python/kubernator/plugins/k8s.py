@@ -222,10 +222,10 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         k8s.client = self._setup_k8s_client()
         version = client.VersionApi(k8s.client).get_code()
-        if "-eks-" or "-gke" in version.git_version:
-            git_version = version.git_version.split("-")[0]
-        else:
-            git_version = version.git_version
+        # Strip vendor-specific suffixes so OpenAPI lookups hit upstream tags.
+        # EKS/GKE use a dash (e.g. v1.28.3-eks-..., v1.28.3-gke.100);
+        # k3s uses a plus sign (e.g. v1.35.3+k3s1).
+        git_version = version.git_version.split("-")[0].split("+")[0]
 
         k8s.server_version = git_version[1:].split(".")
         k8s.server_git_version = git_version
