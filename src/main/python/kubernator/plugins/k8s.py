@@ -26,11 +26,10 @@ from collections.abc import Mapping
 from functools import partial
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Iterable, Callable, Sequence
+from typing import Iterable, Callable, Sequence, Optional
 
 import jsonpatch
 import yaml
-from kubernetes.client import ApiException
 
 from kubernator.api import (KubernatorPlugin,
                             Globs,
@@ -41,12 +40,14 @@ from kubernator.api import (KubernatorPlugin,
                             StripNL,
                             install_python_k8s_client,
                             TemplateEngine,
-                            sleep)
+                            calling_frame_source,
+                            parse_yaml_docs)
 from kubernator.merge import extract_merge_instructions, apply_merge_instructions
 from kubernator.plugins.k8s_api import (K8SResourcePluginMixin,
                                         K8SResource,
                                         K8SResourcePatchType,
-                                        K8SPropagationPolicy)
+                                        K8SPropagationPolicy,
+                                        api_exc_format_body)
 
 logger = logging.getLogger("kubernator.k8s")
 proc_logger = logger.getChild("proc")
@@ -82,21 +83,6 @@ def normalize_pkg_version(v: str):
             new_rev += c
         v_split[-1] = new_rev
     return tuple(map(int, v_split))
-
-
-def api_exc_normalize_body(e: "ApiException"):
-    if e.headers and "content-type" in e.headers:
-        content_type = e.headers["content-type"]
-        if content_type == "application/json" or content_type.endswith("+json"):
-            e.body = json.loads(e.body)
-        elif (content_type in ("application/yaml", "application/x-yaml", "text/yaml",
-                               "text/x-yaml") or content_type.endswith("+yaml")):
-            e.body = yaml.safe_load(e.body)
-
-
-def api_exc_format_body(e: ApiException):
-    if not isinstance(e.body, (str, bytes)):
-        e.body = json.dumps(e.body, indent=4)
 
 
 class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
@@ -159,6 +145,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                    field_validation=field_validation,
                                    field_validation_warn_fatal=field_validation_warn_fatal,
                                    field_validation_warnings=0,
+                                   resource_generator=self.resource_generator,
+                                   resource=self.resource,
                                    conflict_retry_delay=0.3,
                                    _k8s=self,
                                    )
@@ -273,6 +261,22 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 if manifest:
                     self.add_resource(manifest, display_p)
 
+    def resource_generator(self):
+        yield from self.resources.values()
+
+    def resource(self, manifest, source=None):
+        from kubernetes import client
+        if not source:
+            source = calling_frame_source()
+        if isinstance(manifest, str):
+            docs = [m for m in parse_yaml_docs(manifest, source) if m]
+            if len(docs) != 1:
+                raise ValueError(f"ktor.k8s.resource() expects a single manifest document, got {len(docs)} from {source}")
+            manifest = docs[0]
+        res = self._create_resource(manifest, source)
+        res.rdef.populate_api(client, self.context.k8s.client)
+        return res
+
     def handle_apply(self):
         context = self.context
         k8s = context.k8s
@@ -280,19 +284,19 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         self._validate_resources()
 
         cmd = context.app.args.command
-        file = context.app.args.file
+        file_name = context.app.args.file
         file_format = context.app.args.output_format
         dry_run = context.app.args.dry_run
         dump = cmd == "dump"
 
         status_msg = f"{' (dump only)' if dump else ' (dry run)' if dry_run else ''}"
         if dump:
-            logger.info("Will dump the changes into a file %s in %s format", file, file_format)
+            logger.info("Will dump the changes into a file %s in %s format", file_name or "<stdout>", file_format)
 
         patch_field_excludes = [re.compile(e) for e in context.globals.k8s.patch_field_excludes]
         dump_results = []
         total_created, total_patched, total_deleted = 0, 0, 0
-        for resource in self.resources.values():
+        for resource in k8s.resource_generator():
             if dump:
                 resource_id = {"apiVersion": resource.api_version,
                                "kind": resource.kind,
@@ -307,11 +311,13 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                          "body": patch
                                          }
                     dump_results.append(method_descriptor)
+                    return resource.manifest
 
                 def create_func():
                     method_descriptor = {"method": "create",
                                          "body": resource.manifest}
                     dump_results.append(method_descriptor)
+                    return resource.manifest
 
                 def delete_func(*, propagation_policy):
                     method_descriptor = {"method": "delete",
@@ -319,18 +325,19 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                          "propagation_policy": propagation_policy.policy
                                          }
                     dump_results.append(method_descriptor)
+                    return None
             else:
                 patch_func = partial(resource.patch, patch_type=K8SResourcePatchType.JSON_PATCH, dry_run=dry_run)
                 create_func = partial(resource.create, dry_run=dry_run)
                 delete_func = partial(resource.delete, dry_run=dry_run)
 
-            created, patched, deleted = self._apply_resource(dry_run,
-                                                             patch_field_excludes,
-                                                             resource,
-                                                             patch_func,
-                                                             create_func,
-                                                             delete_func,
-                                                             status_msg)
+            created, patched, deleted, result = self._apply_resource(dry_run,
+                                                                     patch_field_excludes,
+                                                                     resource,
+                                                                     patch_func,
+                                                                     create_func,
+                                                                     delete_func,
+                                                                     status_msg)
 
             total_created += created
             total_patched += patched
@@ -344,11 +351,16 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             raise RuntimeError(msg)
 
         if dump:
-            if file_format in ("json", "json-pretty"):
-                json.dump(dump_results, file, sort_keys=True,
-                          indent=4 if file_format == "json-pretty" else None)
-            else:
-                yaml.safe_dump(dump_results, file)
+            file = open(file_name, "w") if file_name else sys.stdout
+            try:
+                if file_format in ("json", "json-pretty"):
+                    json.dump(dump_results, file, sort_keys=True,
+                              indent=4 if file_format == "json-pretty" else None)
+                else:
+                    yaml.safe_dump(dump_results, file)
+            finally:
+                if file_name:
+                    file.close()
         else:
             self._summary = total_created, total_patched, total_deleted
 
@@ -449,8 +461,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                         dry_run,
                         patch_field_excludes: Iterable[re.compile],
                         resource: K8SResource,
-                        patch_func: Callable[[Iterable[dict]], None],
-                        create_func: Callable[[], None],
+                        patch_func: Callable[[Iterable[dict]], Optional[dict]],
+                        create_func: Callable[[], Optional[dict]],
                         delete_func: Callable[[K8SPropagationPolicy], None],
                         status_msg):
         from kubernetes import client
@@ -477,31 +489,15 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                      resource, resource.source, status["message"])
                         raise e from None
 
-        def create(exists_ok=False, wait_for_delete=False):
+        def create(exists_ok=False):
             logger.info("Creating resource %s%s%s", resource, status_msg,
                         " (ignoring existing)" if exists_ok else "")
-            while True:
-                try:
-                    create_func()
-                    return
-                except ApiException as __e:
-                    api_exc_normalize_body(__e)
-                    try:
-                        if exists_ok or wait_for_delete:
-                            if __e.status == 409:
-                                status = __e.body
-                                if status["reason"] == "AlreadyExists":
-                                    if wait_for_delete:
-                                        sleep(self.context.k8s.conflict_retry_delay)
-                                        logger.info("Retry creating resource %s%s%s", resource, status_msg,
-                                                    " (ignoring existing)" if exists_ok else "")
-                                        continue
-                                    else:
-                                        return
-                        raise
-                    except ApiException as ___e:
-                        api_exc_format_body(___e)
-                        raise
+            try:
+                return create_func()
+            except ApiException as __e:
+                if exists_ok and __e.status == 409 and __e.body["reason"] == "AlreadyExists":
+                    return None
+                raise
 
         merge_instrs, normalized_manifest = extract_merge_instructions(resource.manifest, resource)
         if merge_instrs:
@@ -515,14 +511,11 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             remote_resource = resource.get()
             logger.trace("Current resource %s: %s", resource, remote_resource)
         except ApiException as e:
-            api_exc_normalize_body(e)
             try:
                 if e.status == 404:
                     try:
-                        create()
-                        return 1, 0, 0
+                        return 1, 0, 0, create()
                     except ApiException as e:
-                        api_exc_normalize_body(e)
                         if not handle_400_strict_validation_error(e):
                             raise
                 else:
@@ -531,80 +524,94 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                 api_exc_format_body(_e)
                 raise
         else:
-            logger.trace("Attempting to retrieve a normalized patch for resource %s: %s", resource, normalized_manifest)
-            try:
-                merged_resource = resource.patch(normalized_manifest,
-                                                 patch_type=K8SResourcePatchType.SERVER_SIDE_PATCH,
-                                                 dry_run=True,
-                                                 force=True)
-            except ApiException as e:
+            while True:
+                logger.trace("Attempting to retrieve a normalized patch for resource %s: %s",
+                             resource, normalized_manifest)
                 try:
-                    api_exc_normalize_body(e)
+                    merged_resource = resource.patch(normalized_manifest,
+                                                     patch_type=K8SResourcePatchType.SERVER_SIDE_PATCH,
+                                                     dry_run=True,
+                                                     force=True)
+                except ApiException as e:
+                    try:
+                        if e.status == 422:
+                            status = e.body
+                            # Assumes the body has been unmarshalled
+                            details = status["details"]
+                            immutable_key = details.get("group"), details["kind"]
 
-                    if e.status == 422:
-                        status = e.body
-                        # Assumes the body has been unmarshalled
-                        details = status["details"]
-                        immutable_key = details.get("group"), details["kind"]
-
-                        try:
-                            propagation_policy = self.context.k8s.immutable_changes[immutable_key]
-                        except KeyError:
-                            raise e from None
+                            try:
+                                propagation_policy = self.context.k8s.immutable_changes[immutable_key]
+                            except KeyError:
+                                raise e from None
+                            else:
+                                for cause in details["causes"]:
+                                    if (
+                                            cause["reason"] == "FieldValueInvalid" and
+                                            "field is immutable" in cause["message"]
+                                            or
+                                            cause["reason"] == "FieldValueForbidden" and
+                                            ("Forbidden: updates to" in cause["message"]
+                                             or
+                                             "Forbidden: pod updates" in cause["message"])
+                                    ):
+                                        logger.info("Deleting resource %s (cascade %s)%s", resource,
+                                                    propagation_policy.policy,
+                                                    status_msg)
+                                        delete_func(propagation_policy=propagation_policy)
+                                        return 1, 0, 1, create(exists_ok=dry_run)
+                                raise
                         else:
-                            for cause in details["causes"]:
-                                if (
-                                        cause["reason"] == "FieldValueInvalid" and
-                                        "field is immutable" in cause["message"]
-                                        or
-                                        cause["reason"] == "FieldValueForbidden" and
-                                        ("Forbidden: updates to" in cause["message"]
-                                         or
-                                         "Forbidden: pod updates" in cause["message"])
-                                ):
-                                    logger.info("Deleting resource %s (cascade %s)%s", resource,
-                                                propagation_policy.policy,
-                                                status_msg)
-                                    delete_func(propagation_policy=propagation_policy)
-                                    create(exists_ok=dry_run, wait_for_delete=not dry_run)
-                                    return 1, 0, 1
+                            if not handle_400_strict_validation_error(e):
+                                raise
+                    except ApiException as _e:
+                        api_exc_format_body(_e)
+                        raise
+
+                else:
+                    logger.trace("Merged resource %s: %s", resource, merged_resource)
+                    if merge_instrs:
+                        apply_merge_instructions(merge_instrs, normalized_manifest, merged_resource, logger, resource)
+
+                    patch = jsonpatch.make_patch(remote_resource, merged_resource)
+
+                    resource_version = merged_resource["metadata"]["resourceVersion"]
+                    resource_uid = merged_resource["metadata"]["uid"]
+                    logger.trace("Resource %s adding resourceVersion %s and UID %s tests", resource, resource_version,
+                                 resource_uid)
+                    patch.patch.append({"op": "test", "path": "/metadata/uid", "value": resource_uid})
+                    patch.patch.append({"op": "test", "path": "/metadata/resourceVersion", "value": resource_version})
+
+                    logger.trace("Resource %s initial patches are: %s", resource, patch)
+                    patch = self._filter_resource_patch(patch, patch_field_excludes)
+                    logger.trace("Resource %s final patches are: %s", resource, patch)
+                    if patch:
+                        logger.info("Patching resource %s%s", resource, status_msg)
+                        try:
+                            return 0, 1, 0, patch_func(patch)
+                        except ApiException as e:
+                            if e.status == 409:
+                                logger.warning("Patching resource %s%s encountered a conflict - will retry: \n%s",
+                                               resource, status_msg, yaml.dump(e.body))
+                                continue
                             raise
                     else:
-                        if not handle_400_strict_validation_error(e):
-                            raise
-                except ApiException as _e:
-                    api_exc_format_body(_e)
-                    raise
-
-            else:
-                logger.trace("Merged resource %s: %s", resource, merged_resource)
-                if merge_instrs:
-                    apply_merge_instructions(merge_instrs, normalized_manifest, merged_resource, logger, resource)
-
-                patch = jsonpatch.make_patch(remote_resource, merged_resource)
-                logger.trace("Resource %s initial patches are: %s", resource, patch)
-                patch = self._filter_resource_patch(patch, patch_field_excludes)
-                logger.trace("Resource %s final patches are: %s", resource, patch)
-                if patch:
-                    logger.info("Patching resource %s%s", resource, status_msg)
-                    patch_func(patch)
-                    return 0, 1, 0
-                else:
-                    logger.info("Nothing to patch for resource %s", resource)
-                    return 0, 0, 0
+                        logger.info("Nothing to patch for resource %s", resource)
+                        return 0, 0, 0, None
 
     def _filter_resource_patch(self, patch: Iterable[Mapping], excludes: Iterable[re.compile]):
         result = []
         for op in patch:
-            path = op["path"]
-            excluded = False
-            for exclude in excludes:
-                if exclude.match(path):
-                    logger.trace("Excluding %r from patch %s", op, patch)
-                    excluded = True
-                    break
-            if excluded:
-                continue
+            if op["op"] != "test":
+                path = op["path"]
+                excluded = False
+                for exclude in excludes:
+                    if exclude.match(path):
+                        logger.trace("Excluding %r from patch %s", op, patch)
+                        excluded = True
+                        break
+                if excluded:
+                    continue
             result.append(op)
         return result
 

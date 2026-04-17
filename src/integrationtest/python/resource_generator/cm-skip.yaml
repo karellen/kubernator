@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cm-skip
+  namespace: default
+data:
+  kind: skip

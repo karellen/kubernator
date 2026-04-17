@@ -35,7 +35,7 @@ from kubernator.api import (KubernatorPlugin, scan_dir,
                             get_golang_os,
                             get_golang_machine,
                             prepend_os_path, jp, load_file)
-from kubernator.plugins.k8s import api_exc_normalize_body, api_exc_format_body
+from kubernator.plugins.k8s_api import api_exc_format_body
 from kubernator.plugins.k8s_api import K8SResourcePluginMixin
 
 logger = logging.getLogger("kubernator.istio")
@@ -279,16 +279,10 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         try:
             res.delete(dry_run=dry_run)
         except ApiException as e:
-            api_exc_normalize_body(e)
-            try:
-                skip = False
-                if e.status == 404 and missing_ok:
-                    skip = True
-                if not skip:
-                    raise
-            except ApiException as e:
-                api_exc_format_body(e)
-                raise
+            if e.status == 404 and missing_ok:
+                return res
+            api_exc_format_body(e)
+            raise
 
         return res
 
@@ -304,18 +298,10 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         try:
             res.create(dry_run=dry_run)
         except ApiException as e:
-            skip = False
-            api_exc_normalize_body(e)
-            try:
-                if e.status == 409:
-                    status = e.body
-                    if status["reason"] == "AlreadyExists" and exists_ok:
-                        skip = True
-                if not skip:
-                    raise
-            except ApiException as e:
-                api_exc_format_body(e)
-                raise
+            if e.status == 409 and e.body.get("reason") == "AlreadyExists" and exists_ok:
+                return res
+            api_exc_format_body(e)
+            raise
 
         return res
 

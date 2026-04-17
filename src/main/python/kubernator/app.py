@@ -535,26 +535,21 @@ def main():
     else:
         log_stream = sys.stderr
 
-    if args.file:
-        args.file = open(args.file, "w")
-    else:
-        args.file = sys.stdout
-
     init_logging(args.verbose, args.log_format, log_stream)
 
     try:
         if args.clear_cache:
             clear_cache()
-            return
+            return 0
 
         if args.clear_k8s_cache:
             clear_k8s_cache()
-            return
+            return 0
 
         if args.pre_cache_k8s_client:
             pre_cache_k8s_clients(*args.pre_cache_k8s_client,
                                   disable_patching=args.pre_cache_k8s_client_no_patch)
-            return
+            return 0
 
         with App(args) as app:
             app.run()
@@ -571,7 +566,4 @@ def main():
         finally:
             if log_stream != sys.stderr:
                 with closing(log_stream):
-                    pass
-            if args.file != sys.stdout:
-                with closing(args.file):
                     pass
