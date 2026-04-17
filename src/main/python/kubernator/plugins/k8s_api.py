@@ -22,7 +22,7 @@ import re
 from collections import namedtuple
 from collections.abc import Callable, Mapping, MutableMapping, Sequence, Iterable
 from enum import Enum, auto
-from functools import partial
+from functools import partial, wraps
 from pathlib import Path
 from typing import Union, Optional
 
@@ -34,6 +34,45 @@ from jsonschema.validators import extend, Draft7Validator
 from openapi_schema_validator import OAS31Validator
 
 from kubernator.api import load_file, FileType, load_remote_file, calling_frame_source, parse_yaml_docs
+
+
+def api_exc_normalize_body(e):
+    """Parse a raw ApiException body (JSON or YAML) into a Python object in-place.
+
+    Idempotent: if e.body is already a parsed object, it is left unchanged.
+    """
+    if not isinstance(e.body, (str, bytes)):
+        return
+    if e.headers and "content-type" in e.headers:
+        content_type = e.headers["content-type"]
+        if content_type == "application/json" or content_type.endswith("+json"):
+            e.body = json.loads(e.body)
+        elif (content_type in ("application/yaml", "application/x-yaml", "text/yaml",
+                               "text/x-yaml") or content_type.endswith("+yaml")):
+            e.body = yaml.safe_load(e.body)
+
+
+def api_exc_format_body(e):
+    """Format an ApiException body back to a string for human-readable display.
+
+    Idempotent: if e.body is already a string/bytes, it is left unchanged.
+    """
+    if not isinstance(e.body, (str, bytes)):
+        e.body = json.dumps(e.body, indent=4)
+
+
+def _normalize_api_exc(func):
+    """Decorator: normalize ApiException body before propagating."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        from kubernetes.client import ApiException
+        try:
+            return func(*args, **kwargs)
+        except ApiException as e:
+            api_exc_normalize_body(e)
+            raise
+    return wrapper
+
 
 K8S_WARNING_HEADER = re.compile(r'(?:,\s*)?(\d{3})\s+(\S+)\s+"(.+?)(?<!\\)"(?:\s+\"(.+?)(?<!\\)\")?\s*')
 UPPER_FOLLOWED_BY_LOWER_RE = re.compile(r"(.)([A-Z][a-z]+)")
@@ -179,6 +218,7 @@ class K8SResourceDef:
         self._api_create = None
         self._api_patch = None
         self._api_delete = None
+        self._api_list = None
 
     @property
     def group(self) -> str:
@@ -211,6 +251,10 @@ class K8SResourceDef:
     @property
     def delete(self):
         return self._api_delete
+
+    @property
+    def list(self):
+        return self._api_list
 
     def __eq__(self, o: object) -> bool:
         if not isinstance(o, K8SResourceDef):
@@ -291,11 +335,13 @@ class K8SResourceDef:
                 self._api_patch = partial(k8s_api.patch_namespaced_custom_object, **kwargs)
                 self._api_create = partial(k8s_api.create_namespaced_custom_object, **kwargs)
                 self._api_delete = partial(k8s_api.delete_namespaced_custom_object, **kwargs)
+                self._api_list = partial(k8s_api.list_namespaced_custom_object, **kwargs)
             else:
                 self._api_get = partial(k8s_api.get_cluster_custom_object, **kwargs)
                 self._api_patch = partial(k8s_api.patch_cluster_custom_object, **kwargs)
                 self._api_create = partial(k8s_api.create_cluster_custom_object, **kwargs)
                 self._api_delete = partial(k8s_api.delete_cluster_custom_object, **kwargs)
+                self._api_list = partial(k8s_api.list_cluster_custom_object, **kwargs)
         else:
             # Take care for the case e.g. api_type is "apiextensions.k8s.io"
             # Only replace the last instance
@@ -316,11 +362,13 @@ class K8SResourceDef:
                 self._api_patch = getattr(k8s_api, f"patch_namespaced_{kind}")
                 self._api_create = getattr(k8s_api, f"create_namespaced_{kind}")
                 self._api_delete = getattr(k8s_api, f"delete_namespaced_{kind}")
+                self._api_list = getattr(k8s_api, f"list_namespaced_{kind}")
             else:
                 self._api_get = getattr(k8s_api, f"read_{kind}")
                 self._api_patch = getattr(k8s_api, f"patch_{kind}")
                 self._api_create = getattr(k8s_api, f"create_{kind}")
                 self._api_delete = getattr(k8s_api, f"delete_{kind}")
+                self._api_list = getattr(k8s_api, f"list_{kind}")
 
 
 class K8SResourceKey(namedtuple("K8SResourceKey", ["group", "kind", "name", "namespace"])):
@@ -390,6 +438,7 @@ class K8SResource:
     def __str__(self):
         return f"{self.api_version}/{self.kind}/{self.name}{'.' + self.namespace if self.namespace else ''}"
 
+    @_normalize_api_exc
     def get(self):
         rdef = self.rdef
         kwargs = {"name": self.name,
@@ -398,6 +447,7 @@ class K8SResource:
             kwargs["namespace"] = self.namespace
         return json.loads(self.rdef.get(**kwargs).data)
 
+    @_normalize_api_exc
     def create(self, dry_run=True):
         rdef = self.rdef
         kwargs = {"body": self.manifest,
@@ -416,6 +466,7 @@ class K8SResource:
         self._process_response_headers(resp)
         return json.loads(resp.data)
 
+    @_normalize_api_exc
     def patch(self, json_patch, *, patch_type: K8SResourcePatchType, force=False, dry_run=True):
         rdef = self.rdef
         kwargs = {"name": self.name,
@@ -455,7 +506,9 @@ class K8SResource:
         finally:
             api_client.select_header_content_type = old_func
 
-    def delete(self, *, dry_run=True, propagation_policy=K8SPropagationPolicy.BACKGROUND):
+    @_normalize_api_exc
+    def delete(self, *, dry_run=True, propagation_policy=K8SPropagationPolicy.BACKGROUND, wait=True):
+        from kubernetes.client import ApiException
         rdef = self.rdef
         kwargs = {"name": self.name,
                   "_preload_content": False,
@@ -466,7 +519,35 @@ class K8SResource:
         if dry_run:
             kwargs["dry_run"] = "All"
 
-        return json.loads(rdef.delete(**kwargs).data)
+        result = json.loads(rdef.delete(**kwargs).data)
+
+        if wait and not dry_run:
+            # Wait for the resource to actually disappear by watching for the
+            # DELETED event. If the resource is already gone before the watch
+            # opens (race), the watch produces no events; loop with a short
+            # server-side timeout and re-check existence via get() to break out.
+            while True:
+                for event in self.watch(timeout_seconds=10):
+                    if event["type"] == "DELETED":
+                        return result
+                try:
+                    self.get()
+                except ApiException as e:
+                    if e.status == 404:
+                        return result
+                    raise
+
+        return result
+
+    def watch(self, *, timeout_seconds=None):
+        from kubernetes import watch as k8s_watch
+        rdef = self.rdef
+        kwargs = {"field_selector": f"metadata.name={self.name}"}
+        if rdef.namespaced:
+            kwargs["namespace"] = self.namespace
+        if timeout_seconds is not None:
+            kwargs["timeout_seconds"] = timeout_seconds
+        return k8s_watch.Watch().stream(rdef.list, **kwargs)
 
     @staticmethod
     def get_manifest_key(manifest):

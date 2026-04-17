@@ -458,6 +458,11 @@ File discovery uses globs `*.yaml` / `*.yml` by default, configurable per-direct
 * `ktor.k8s.add_manifest_patcher(func)` — register a low-level manifest patcher.
 * `ktor.k8s.get_api_versions()` — set of `(group, version)` tuples in use.
 * `ktor.k8s.create_resource(manifest)` — wrap a manifest as a `K8SResource` without registering it.
+* `ktor.k8s.resource(manifest)` — return a fully-wired `K8SResource` with API bindings populated, for
+  imperative CRUD (`.get()`, `.create(dry_run=False)`, `.patch(...)`, `.delete(wait=True)`, `.watch()`)
+  that bypasses the declarative apply lifecycle. Accepts a manifest `dict` or a single-document YAML string.
+* `ktor.k8s.resource_generator()` — iterable of resources fed to the apply pipeline; override this on
+  a subclass / wrap via context binding to filter or augment the set declaratively before apply.
 * `ktor.k8s.client`, `ktor.k8s.server_version`, `ktor.k8s.server_git_version` — access the underlying Kubernetes client.
 * `ktor.k8s.field_validation` (`"Ignore"`/`"Warn"`/`"Strict"`),
   `ktor.k8s.field_validation_warn_fatal`,

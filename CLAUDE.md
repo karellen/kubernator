@@ -27,7 +27,10 @@ PyBuilder project — standard `src/main/python`, `src/unittest/python`,
 
 ## Build / Test
 
-PyBuilder per global instructions. Key bits specific to this repo:
+PyBuilder per global instructions. Always use `pyb -vX` (verbose + debug output) for
+all build invocations, including subset tasks (e.g. `pyb -vX run_unit_tests`).
+
+Key bits specific to this repo:
 
 - `coverage_break_build = False` and `cram_fail_if_no_tests = False` — build does not
   fail on coverage thresholds or empty cram dirs. Do not assume failures surface there.
