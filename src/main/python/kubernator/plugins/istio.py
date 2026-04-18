@@ -28,13 +28,13 @@ import yaml
 
 from kubernator.api import (KubernatorPlugin, scan_dir,
                             TemplateEngine,
-                            load_remote_file,
                             FileType,
                             StripNL,
                             Globs,
                             get_golang_os,
                             get_golang_machine,
                             prepend_os_path, jp, load_file)
+from kubernator.plugins import k8s_schema
 from kubernator.plugins.k8s_api import api_exc_format_body
 from kubernator.plugins.k8s_api import K8SResourcePluginMixin
 
@@ -175,12 +175,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
             "yaml")
 
         # This plugin only deals with Istio Operator, so only load that stuff
-        self.resource_definitions_schema = load_remote_file(logger,
-                                                            f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
-                                                            f"{self.context.k8s.server_git_version}"
-                                                            f"/api/openapi-spec/swagger.json",
-                                                            FileType.JSON)
-        self._populate_resource_definitions()
+        self.validator = k8s_schema.make_validator(self.context)
 
         crd_operator_version = (1, 23, 4) if self.client_version >= (1, 24, 0) else self.client_version
         self.add_remote_crds(

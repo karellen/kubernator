@@ -468,6 +468,16 @@ File discovery uses globs `*.yaml` / `*.yml` by default, configurable per-direct
   `ktor.k8s.field_validation_warn_fatal`,
   `ktor.k8s.disable_client_patches`,
   `ktor.k8s.conflict_retry_delay` — behavioural knobs, all settable at `register_plugin` time.
+* `ktor.k8s.openapi_version` (`"auto"`/`"v2"`/`"v3"`, default `"auto"`) — choose the OpenAPI dialect used for
+  client-side validation. `auto` picks v3 on Kubernetes ≥ 1.27 (where v3 went GA) and falls back to v2
+  on any v3 failure. v3 is lossless (honours `oneOf`/`anyOf`/`nullable`/`default`), enforces the K8s
+  extensions (`x-kubernetes-list-type`, `-preserve-unknown-fields`, `-embedded-resource`,
+  `-int-or-string`), and evaluates `x-kubernetes-validations` CEL rules (including
+  `optional.of`/`optional.none` and the K8s CEL libraries for lists, regex, format, quantity, IP, CIDR)
+  pre-flight. Transition rules fire against the cluster's current state at apply time.
+* `ktor.k8s.openapi_source` (`"auto"`/`"cluster"`/`"github"`, default `"auto"`) — v3 discovery source.
+  `auto` tries the cluster's `/openapi/v3` endpoint first and falls back to GitHub's
+  `api/openapi-spec/v3/` at the cluster's git tag.
 * `ktor.k8s.patch_field_excludes`, `ktor.k8s.immutable_changes` — advanced patch/diff controls.
 
 ### Helm Plugin (`helm`)

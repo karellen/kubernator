@@ -1,0 +1,14 @@
+apiVersion: kubernator.example.com/v1
+kind: Widget
+metadata:
+  name: good-widget
+  namespace: default
+spec:
+  name: good-widget
+  replicas: 3
+  maxReplicas: 10
+  ports:
+    - protocol: TCP
+      port: 80
+    - protocol: UDP
+      port: 53

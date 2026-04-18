@@ -1,0 +1,16 @@
+# CEL rule violation: replicas exceeds maxReplicas — v3 must reject.
+apiVersion: kubernator.example.com/v1
+kind: Widget
+metadata:
+  name: bad-widget
+  namespace: default
+spec:
+  name: bad-widget
+  replicas: 15
+  maxReplicas: 10
+  ports:
+    # list-type: map duplicate composite key (TCP, 80) — v3 must reject.
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 80
