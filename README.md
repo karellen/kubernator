@@ -128,6 +128,8 @@ kubernator [OPTIONS] [dump|apply]
 | `-o, --output-format {json,json-pretty,yaml}` | Output format. Default `yaml`.                                       |
 | `-p, --path PATH`                    | Starting directory. Default current directory.                                 |
 | `--yes`                              | Actually apply changes. Without this flag Kubernator runs as a dry-run.        |
+| `-I, --include-project PROJECT`      | Repeatable. Limit the run to the named project and its sub-tree. No-op unless the `project` plugin is registered. |
+| `-X, --exclude-project PROJECT`      | Repeatable. Exclude the named project and its sub-tree. No-op unless the `project` plugin is registered. |
 | `command`                            | `dump` (default) writes the computed plan; `apply` applies it to the cluster.  |
 
 ## Mode of Operation
@@ -150,8 +152,9 @@ The pipeline stages, in order, are:
     3. **After Directory** — every plugin's `handle_after_dir` (reverse order).
 4. **Apply** — every plugin's `handle_apply` (e.g. Kubernetes plugin pushes resources to the cluster when `--yes`).
 5. **Verify** — every plugin's `handle_verify`.
-6. **Shutdown** — every plugin's `handle_shutdown` (cleanups, even on failure).
-7. **Summary** — every plugin's `handle_summary` (on success only).
+6. **Cleanup** — every plugin's `handle_cleanup` (runs after verify, so verify failures prevent cleanup).
+7. **Shutdown** — every plugin's `handle_shutdown` (cleanups, even on failure).
+8. **Summary** — every plugin's `handle_summary` (on success only).
 
 Within "for each directory", after `after_dir` fires, the app plugin scans the current directory for sub-directories,
 filters them through `context.app.excludes`, re-orders the survivors according to `context.app.includes` patterns, and
@@ -198,6 +201,7 @@ any), and whether Kubernator downloads that binary automatically given a version
 | `helm`       | Renders Helm charts (classic repo and OCI) into K8s resources.   | `helm`       | Yes              |
 | `istio`      | Installs and upgrades Istio via `istioctl`/IstioOperator.        | `istioctl`   | Yes              |
 | `templates`  | Registers and renders Jinja2 templates that emit K8s resources.  | —            | —                |
+| `project`    | Scopes, tracks ownership, and cleans up resources by a hierarchical project name. | — | — |
 
 ### App Plugin (`app`)
 
@@ -456,6 +460,10 @@ File discovery uses globs `*.yaml` / `*.yml` by default, configurable per-direct
   `func(resources, resource)` that may mutate manifests before apply.
 * `ktor.k8s.add_validator(func)` — register a validator run after transformation.
 * `ktor.k8s.add_manifest_patcher(func)` — register a low-level manifest patcher.
+* `ktor.k8s.add_resource_filter(predicate)` / `ktor.k8s.remove_resource_filter(predicate)` — register/remove a
+  predicate `predicate(resource)` consulted by `resource_generator()`; returning `False` skips the resource.
+  Used internally by the `project` plugin for `-I`/`-X` scoping, but available to any script that needs
+  declarative filtering without overriding the generator.
 * `ktor.k8s.get_api_versions()` — set of `(group, version)` tuples in use.
 * `ktor.k8s.create_resource(manifest)` — wrap a manifest as a `K8SResource` without registering it.
 * `ktor.k8s.resource(manifest)` — return a fully-wired `K8SResource` with API bindings populated, for
@@ -526,6 +534,38 @@ Installs and upgrades Istio using `istioctl` against an `IstioOperator` resource
 * `ktor.istio.default_includes`, `ktor.istio.default_excludes`, `ktor.istio.includes`, `ktor.istio.excludes`
 * `ktor.istio.istioctl_file`, `ktor.istio.stanza()`
 * `ktor.istio.test()` — run `istioctl version`, returning `(version_tuple, full_output_dict)`.
+
+### Project Plugin (`project`)
+
+Introduces hierarchical ownership, scoping, and cleanup for Kubernator-managed resources. Register once at the root with a `name` — that name becomes the root of the project tree. Sub-directories extend the tree by assigning `ktor.app.project = "<segment>"` in their `.kubernator.py`; segments are dot-joined top-down into the full project path (e.g. `demo.api.frontend`). Segment regex is `[A-Za-z0-9_\-]+` — no dots, no special characters. Must be registered **before** any resources are added; `project.register()` raises if the `k8s` plugin already has resources.
+
+```python
+ktor.app.register_plugin("k8s")
+ktor.app.register_plugin("project", name="demo", cleanup=True)
+# later, in a subdir
+ktor.app.project = "api"
+```
+
+Once registered, the k8s plugin:
+
+- stamps every applied resource with a `kubernator.io/project` annotation carrying the composed path;
+- honours `-I`/`-X` CLI flags to scope the run to specific sub-trees (prefix match; combined as `candidates = known ∩ includes` then `in_scope = candidates − excludes`);
+- records a per-root state Secret at `<state_namespace>/kubernator-project-<sha1(root)[:12]>` (default namespace `kubernator-system`) containing a gzipped JSON payload of the owned resources' idents;
+- on each run, diffs the prior Secret against the current manifest set and (when `cleanup=True`) deletes resources that used to belong to an in-scope sub-project but no longer do;
+- serialises concurrent runs against the same root via a `coordination.k8s.io/v1.Lease` named `kubernator-project-<sha1(root)[:12]>-lock` in the same namespace.
+
+The Secret write is two-phase: before `apply` the new intent is recorded as `pending` with `finalized=false`; after successful apply + cleanup the finalized payload replaces it. A crash between the two phases leaves `finalized=false`; the next run's cleanup conservatively unions prior `resources ∪ pending`, so no previously-owned resource leaks.
+
+#### `register_plugin` keyword arguments
+
+* `name` *(required)* — segment assigned at the current context's `.app.project`. Also the root of the project tree when registered at the top level.
+* `cleanup=False` — if `True`, delete resources present in the prior Secret but absent from the current in-scope manifests. If `False`, diffs are logged but nothing is deleted.
+* `state_namespace="kubernator-system"` — namespace for the state Secret and the Lease. Auto-created by the k8s plugin on a committed (non-dry-run) invocation.
+
+#### Context
+
+* `ktor.app.project`
+  > The composed project path at the current context, or `None` if no segment is set anywhere in the chain. Read-only unless you know what you're doing — the descriptor enforces single-assignment per context and validates segment syntax.
 
 ### Templates Plugin (`templates`)
 

@@ -470,18 +470,41 @@ class _PropertyList(MutableSequence):
             setattr(self.__write_parent, self.__name, self.__write_seq)
 
 
+class ContextProperty:
+    """Callable descriptor stored as a value in a PropertyDict. When any
+    PropertyDict in the ancestor chain holds a ``ContextProperty`` under the
+    accessed name, attribute access is dispatched here with the *origin*
+    PropertyDict (the one the access started from), so the descriptor can
+    walk the chain upward itself."""
+
+    __slots__ = ("fget", "fset")
+
+    def __init__(self, fget, fset=None):
+        self.fget = fget
+        self.fset = fset
+
+
 class PropertyDict:
+    # Names ever installed as a ``ContextProperty`` on any PropertyDict. The
+    # fast path in ``__getattr__``/``__setattr__`` skips the full-chain walk
+    # for names that are never descriptors — which is the overwhelming
+    # majority of attribute accesses in practice.
+    _descriptor_names: set = set()
+
     def __init__(self, _dict=None, _parent=None):
         self.__dict__["_PropertyDict__dict"] = _dict or {}
         self.__dict__["_PropertyDict__parent"] = _parent
 
     def __getattr__(self, item):
-        v = self.__getattr(item)
+        if item in PropertyDict._descriptor_names:
+            v = self.__descriptor_getattr(item, self)
+        else:
+            v = self.__plain_getattr(item)
         if isinstance(v, _PropertyList):
             v._PropertyList__write_parent = self
         return v
 
-    def __getattr(self, item):
+    def __plain_getattr(self, item):
         try:
             v = self.__dict[item]
             if isinstance(v, list):
@@ -490,12 +513,47 @@ class PropertyDict:
         except KeyError:
             parent = self.__parent
             if parent is not None:
-                return parent.__getattr(item)
+                return parent._PropertyDict__plain_getattr(item)
             raise AttributeError("no attribute %r" % item) from None
+
+    def __descriptor_getattr(self, item, origin):
+        first_layer = None
+        first_value = None
+        found_raw = False
+        cur = self
+        while cur is not None:
+            d = cur._PropertyDict__dict
+            if item in d:
+                v = d[item]
+                if isinstance(v, ContextProperty):
+                    return v.fget(origin)
+                if not found_raw:
+                    first_layer = cur
+                    first_value = v
+                    found_raw = True
+            cur = cur._PropertyDict__parent
+        if found_raw:
+            if isinstance(first_value, list):
+                return _PropertyList(first_value, first_layer, item)
+            return first_value
+        raise AttributeError("no attribute %r" % item) from None
 
     def __setattr__(self, key, value):
         if key.startswith("_PropertyDict__"):
             raise AttributeError("prohibited attribute %r" % key)
+        if key in PropertyDict._descriptor_names:
+            cur = self
+            while cur is not None:
+                d = cur._PropertyDict__dict
+                if key in d and isinstance(d[key], ContextProperty):
+                    descriptor = d[key]
+                    if descriptor.fset is None:
+                        raise AttributeError("%s is read-only" % key)
+                    descriptor.fset(self, value)
+                    return
+                cur = cur._PropertyDict__parent
+        if isinstance(value, ContextProperty):
+            PropertyDict._descriptor_names.add(key)
         if isinstance(value, dict):
             parent_dict = None
             if self.__parent is not None:
@@ -823,6 +881,9 @@ class KubernatorPlugin:
         pass
 
     def handle_verify(self):
+        pass
+
+    def handle_cleanup(self):
         pass
 
     def handle_shutdown(self):
