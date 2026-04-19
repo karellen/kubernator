@@ -76,6 +76,8 @@ LOWER_OR_NUM_FOLLOWED_BY_UPPER_RE = re.compile(r"([a-z0-9])([A-Z])")
 CLUSTER_RESOURCE_PATH = re.compile(r"^/apis?/(?:[^/]+/){1,2}([^/]+)$")
 NAMESPACED_RESOURCE_PATH = re.compile(r"^/apis?/(?:[^/]+/){1,2}namespaces/[^/]+/([^/]+)$")
 
+PROJECT_ANNOTATION = "kubernator.io/project"
+
 
 class K8SResourcePatchType(Enum):
     JSON_PATCH = auto()
@@ -340,6 +342,12 @@ class K8SResource:
     @property
     def is_crd(self):
         return self.group == "apiextensions.k8s.io" and self.kind == "CustomResourceDefinition"
+
+    @property
+    def project(self) -> Optional[str]:
+        metadata = self.manifest.get("metadata") or {}
+        annotations = metadata.get("annotations") or {}
+        return annotations.get(PROJECT_ANNOTATION)
 
     def __str__(self):
         return f"{self.api_version}/{self.kind}/{self.name}{'.' + self.namespace if self.namespace else ''}"

@@ -21,6 +21,7 @@ import datetime
 import importlib
 import logging
 import pkgutil
+import re
 import sys
 import urllib.parse
 from collections import deque
@@ -34,6 +35,7 @@ import yaml
 
 import kubernator
 from kubernator.api import (KubernatorPlugin, Globs, scan_dir, PropertyDict, config_as_dict, config_parent,
+                            ContextProperty,
                             download_remote_file, load_remote_file, Repository, StripNL, jp, get_app_cache_dir,
                             get_cache_dir, install_python_k8s_client)
 from kubernator.proc import run, run_capturing_out, run_pass_through_capturing
@@ -62,6 +64,9 @@ try:
     del (yaml.resolver.Resolver.yaml_implicit_resolvers["="])
 except KeyError:
     pass
+
+
+_PROJECT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
 
 def define_arg_parse():
@@ -99,6 +104,14 @@ def define_arg_parse():
     #                        help="specify a version of Kubernetes when operating in the disconnected mode")
     parser.add_argument("--yes", action="store_false", default=True, dest="dry_run",
                         help="actually make destructive changes")
+    parser.add_argument("-I", "--include-project", action="append", default=[],
+                        metavar="PROJECT", dest="include_project",
+                        help="limit the run to the named project and its sub-tree "
+                             "(repeatable; no-op unless the project plugin is registered)")
+    parser.add_argument("-X", "--exclude-project", action="append", default=[],
+                        metavar="PROJECT", dest="exclude_project",
+                        help="exclude the named project and its sub-tree "
+                             "(repeatable; no-op unless the project plugin is registered)")
     parser.add_argument("command", nargs="?", choices=["dump", "apply"], default="dump",
                         help="whether to dump the proposed changes to the output or to apply them")
     return parser
@@ -166,6 +179,7 @@ class App(KubernatorPlugin):
 
         self._cleanups = []
         self._plugin_types = {}
+        self._project_segments: dict[PropertyDict, str] = {}
 
     def __enter__(self):
         return self
@@ -212,6 +226,9 @@ class App(KubernatorPlugin):
                 self._run_handlers(KubernatorPlugin.handle_apply, True, context, None)
 
                 self._run_handlers(KubernatorPlugin.handle_verify, True, context, None)
+
+                # Cleanup runs after verify so a verify failure prevents cleanup.
+                self._run_handlers(KubernatorPlugin.handle_cleanup, True, context, None)
             finally:
                 self.context = self._top_dir_context
                 context = self.context
@@ -315,13 +332,18 @@ class App(KubernatorPlugin):
             __plugin.set_context(__context)
             run(__plugin)
         else:
-            self._set_plugin_context(__reverse, __context, run)
+            self._dispatch_to_all_plugins(__reverse, __context, run)
 
-    def _set_plugin_context(self, reverse, context, run):
-        for h in list(self.context._plugins if not reverse else reversed(self.context._plugins)):
+    def _dispatch_to_all_plugins(self, reverse, context, run):
+        plugins = list(self.context._plugins if not reverse else reversed(self.context._plugins))
+        for h in plugins:
             h.set_context(context)
-            run(h)
-            h.set_context(None)
+        try:
+            for h in plugins:
+                run(h)
+        finally:
+            for h in plugins:
+                h.set_context(None)
 
     def _exec_ktor(self, ktor_py: Path):
         ktor_py_display_path = self._display_path(ktor_py)
@@ -378,12 +400,36 @@ class App(KubernatorPlugin):
                                    default_includes=Globs(["*"], True),
                                    default_excludes=Globs([".*"], True),
                                    )
+        context.globals.app.project = ContextProperty(self._get_project, self._set_project)
+
         context.app = dict(_repository_credentials_provider=None,
                            default_includes=Globs(context.app.default_includes),
                            default_excludes=Globs(context.app.default_excludes),
                            includes=Globs(context.app.default_includes),
                            excludes=Globs(context.app.default_excludes),
                            )
+
+    def _get_project(self, origin):
+        segs = []
+        cur = self.context
+        while cur is not None:
+            seg = self._project_segments.get(cur)
+            if seg is not None:
+                segs.append(seg)
+            cur = config_parent(cur)
+        if not segs:
+            return None
+        segs.reverse()
+        return ".".join(segs)
+
+    def _set_project(self, origin, value):
+        if not isinstance(value, str) or not _PROJECT_SEGMENT_RE.match(value):
+            raise ValueError("invalid project segment %r" % (value,))
+        ctx = self.context
+        if ctx in self._project_segments:
+            raise ValueError("project already set to %r in this context" %
+                             (self._project_segments[ctx],))
+        self._project_segments[ctx] = value
 
     def handle_before_dir(self, cwd: Path):
         context = self.context
@@ -413,6 +459,19 @@ class App(KubernatorPlugin):
         self.path_q.extend(reversed(self._new_paths))
 
         del app.cwd
+
+    def handle_summary(self):
+        if "project" in self.context.globals:
+            return
+        args = self.args
+        unused = ["%s %s" % (flag, val)
+                  for flag, val in (("-I/--include-project", args.include_project),
+                                    ("-X/--exclude-project", args.exclude_project))
+                  if val]
+        if unused:
+            logger.warning(
+                "Project scoping flag(s) %s had no effect because the project "
+                "plugin was not registered in this run.", ", ".join(unused))
 
     def repository(self, repo):
         repository = Repository(repo, self._repo_cred_augmentation)
