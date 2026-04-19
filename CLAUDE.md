@@ -17,8 +17,18 @@ PyBuilder project — standard `src/main/python`, `src/unittest/python`,
   - `api.py` — plugin-facing API (`ktor.*`), context hierarchy, Jinja env, JSON schema,
     diff-match-patch, HTTP, etc.
   - `merge.py`, `_json_path.py`, `_k8s_client_patches.py`, `proc.py` — internals
-  - `plugins/` — `awscli`, `eks`, `gke`, `helm`, `istio`, `k8s`, `k8s_api`, `kind`,
-    `kubeconfig`, `kubectl`, `minikube`, `template`, `terraform`, `terragrunt`
+  - `plugins/` — `awscli`, `eks`, `gke`, `helm`, `istio`, `k8s`, `k8s_api`, `k3d`,
+    `k8s_schema/`, `kind`, `kubeconfig`, `kubectl`, `minikube`, `template`, `terraform`,
+    `terragrunt`
+  - `plugins/k8s_schema/` — OpenAPI validation extracted out of `k8s.py` / `k8s_api.py`.
+    `make_validator(ctx, …)` returns either a `SwaggerV2Validator` or an
+    `OpenAPIV3Validator`. Factory default is `openapi_version="auto"` (v3 on server
+    ≥ 1.27 with v2 fallback). The v3 path fetches the discovery index cluster-first
+    (GitHub fallback), lazily fetches per-group sub-documents, enforces K8s extension
+    keywords (`x-kubernetes-list-type`, `x-kubernetes-preserve-unknown-fields`,
+    `x-kubernetes-embedded-resource`, `x-kubernetes-int-or-string`), and evaluates
+    `x-kubernetes-validations` CEL rules via `cel-python` + ported K8s extension
+    libraries (lists, regex, format, quantity, IP, CIDR) under `cel/extensions/`.
 - `src/unittest/python/` — pytest-style unit tests (`*_tests.py`)
 - `src/integrationtest/python/` — cram-style integration tests, many organized by
   `issue_NN/` reproducing specific bugs

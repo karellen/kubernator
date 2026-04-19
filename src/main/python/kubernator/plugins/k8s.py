@@ -36,13 +36,13 @@ from kubernator.api import (KubernatorPlugin,
                             scan_dir,
                             load_file,
                             FileType,
-                            load_remote_file,
                             StripNL,
                             install_python_k8s_client,
                             TemplateEngine,
                             calling_frame_source,
                             parse_yaml_docs)
 from kubernator.merge import extract_merge_instructions, apply_merge_instructions
+from kubernator.plugins import k8s_schema
 from kubernator.plugins.k8s_api import (K8SResourcePluginMixin,
                                         K8SResource,
                                         K8SResourcePatchType,
@@ -108,11 +108,18 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
     def register(self,
                  field_validation="Warn",
                  field_validation_warn_fatal=True,
-                 disable_client_patches=False):
+                 disable_client_patches=False,
+                 openapi_version="auto",
+                 openapi_source="auto"):
         self.context.app.register_plugin("kubeconfig")
 
         if field_validation not in VALID_FIELD_VALIDATION:
             raise ValueError("'field_validation' must be one of %s" % (", ".join(VALID_FIELD_VALIDATION)))
+
+        if openapi_version not in ("auto", "v2", "v3"):
+            raise ValueError("'openapi_version' must be auto|v2|v3")
+        if openapi_source not in ("auto", "cluster", "github"):
+            raise ValueError("'openapi_source' must be auto|cluster|github")
 
         context = self.context
         context.globals.k8s = dict(patch_field_excludes=("^/metadata/managedFields",
@@ -120,6 +127,8 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                                                          "^/metadata/creationTimestamp",
                                                          "^/metadata/resourceVersion",
                                                          ),
+                                   openapi_version=openapi_version,
+                                   openapi_source=openapi_source,
                                    immutable_changes={("apps", "DaemonSet"): K8SPropagationPolicy.BACKGROUND,
                                                       ("apps", "StatefulSet"): K8SPropagationPolicy.ORPHAN,
                                                       ("apps", "Deployment"): K8SPropagationPolicy.ORPHAN,
@@ -193,14 +202,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         logger.info("Switching to Kubernetes client version %s", ".".join(self.embedded_pkg_version))
         self._setup_client()
 
-        logger.debug("Reading Kubernetes OpenAPI spec for %s", k8s.server_git_version)
-
-        k8s_def = load_remote_file(logger, f"https://raw.githubusercontent.com/kubernetes/kubernetes/"
-                                           f"{k8s.server_git_version}/api/openapi-spec/swagger.json",
-                                   FileType.JSON)
-        self.resource_definitions_schema = k8s_def
-
-        self._populate_resource_definitions()
+        self.validator = k8s_schema.make_validator(self.context)
 
     def _setup_client(self):
         from kubernetes import client
@@ -510,6 +512,19 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
         try:
             remote_resource = resource.get()
             logger.trace("Current resource %s: %s", resource, remote_resource)
+            # v3 evaluates transition rules here (oldSelf bound to the
+            # server's current state). v2 has no transition rules and
+            # the resource was already schema-validated at add_resource
+            # time, so skip a second pass.
+            if self.validator.version == "v3":
+                transition_errors = list(
+                    self.validator.iter_errors(resource.manifest, resource.rdef,
+                                               old_manifest=remote_resource))
+                if transition_errors:
+                    for err in transition_errors:
+                        logger.error("Transition rule violation on %s from %s: %s",
+                                     resource, resource.source, err)
+                    raise transition_errors[0]
         except ApiException as e:
             try:
                 if e.status == 404:

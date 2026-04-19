@@ -66,6 +66,7 @@ def set_properties(project):
     project.depends_on("coloredlogs", "~=15.0")
     project.depends_on("jsonschema", "~=4.23")
     project.depends_on("diff-match-patch", ">2023.0")
+    project.depends_on("cel-python", "~=0.5")
 
     project.set_property("coverage_break_build", False)
     project.set_property("cram_fail_if_no_tests", False)

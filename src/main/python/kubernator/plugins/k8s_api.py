@@ -16,22 +16,17 @@
 #   limitations under the License.
 #
 
-import base64
 import json
 import re
 from collections import namedtuple
-from collections.abc import Callable, Mapping, MutableMapping, Sequence, Iterable
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from enum import Enum, auto
 from functools import partial, wraps
 from pathlib import Path
 from typing import Union, Optional
 
 import yaml
-from jsonschema._format import FormatChecker
-from jsonschema._keywords import required
 from jsonschema.exceptions import ValidationError
-from jsonschema.validators import extend, Draft7Validator
-from openapi_schema_validator import OAS31Validator
 
 from kubernator.api import load_file, FileType, load_remote_file, calling_frame_source, parse_yaml_docs
 
@@ -78,32 +73,6 @@ K8S_WARNING_HEADER = re.compile(r'(?:,\s*)?(\d{3})\s+(\S+)\s+"(.+?)(?<!\\)"(?:\s
 UPPER_FOLLOWED_BY_LOWER_RE = re.compile(r"(.)([A-Z][a-z]+)")
 LOWER_OR_NUM_FOLLOWED_BY_UPPER_RE = re.compile(r"([a-z0-9])([A-Z])")
 
-K8S_MINIMAL_RESOURCE_SCHEMA = {
-    "properties": {
-        "apiVersion": {
-            "type": "string"
-        },
-        "kind": {
-            "type": "string"
-        },
-        "metadata": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string"
-                },
-                "namespace": {
-                    "type": "string"
-                }
-            },
-            "required": ["name"]
-        }
-    },
-    "type": "object",
-    "required": ["apiVersion", "kind"]
-}
-K8S_MINIMAL_RESOURCE_VALIDATOR = Draft7Validator(K8S_MINIMAL_RESOURCE_SCHEMA)
-
 CLUSTER_RESOURCE_PATH = re.compile(r"^/apis?/(?:[^/]+/){1,2}([^/]+)$")
 NAMESPACED_RESOURCE_PATH = re.compile(r"^/apis?/(?:[^/]+/){1,2}namespaces/[^/]+/([^/]+)$")
 
@@ -120,69 +89,6 @@ class K8SPropagationPolicy(Enum):
 
     def __init__(self, policy):
         self.policy = policy
-
-
-def is_integer(instance):
-    # bool inherits from int, so ensure bools aren't reported as ints
-    if isinstance(instance, bool):
-        return False
-    return isinstance(instance, int)
-
-
-def is_string(instance):
-    return isinstance(instance, str)
-
-
-def type_validator(validator, data_type, instance, schema):
-    if instance is None:
-        return
-
-    if data_type == "string" and schema.get("format") == "int-or-string":
-        if not (is_string(instance) or is_integer(instance)):
-            yield ValidationError("%r is not of type %s" % (instance, "int-or-string"))
-    elif not validator.is_type(instance, data_type):
-        yield ValidationError("%r is not of type %s" % (instance, data_type))
-
-
-K8SValidator = extend(OAS31Validator, validators={
-    "type": type_validator,
-    "required": required
-})
-
-k8s_format_checker = FormatChecker()
-
-
-@k8s_format_checker.checks("int32")
-def check_int32(value):
-    return value is not None and (-2147483648 < value < 2147483647)
-
-
-@k8s_format_checker.checks("int64")
-def check_int64(value):
-    return value is not None and (-9223372036854775808 < value < 9223372036854775807)
-
-
-@k8s_format_checker.checks("float")
-def check_float(value):
-    return value is not None and (-3.4E+38 < value < +3.4E+38)
-
-
-@k8s_format_checker.checks("double")
-def check_double(value):
-    return value is not None and (-1.7E+308 < value < +1.7E+308)
-
-
-@k8s_format_checker.checks("byte", ValueError)
-def check_byte(value):
-    if value is None:
-        return False
-    base64.b64decode(value, validate=True)
-    return True
-
-
-@k8s_format_checker.checks("int-or-string")
-def check_int_or_string(value):
-    return check_int32(value) if is_integer(value) else is_string(value)
 
 
 def to_group_and_version(api_version):
@@ -591,11 +497,22 @@ class K8SResource:
 
 class K8SResourcePluginMixin:
     def __init__(self):
-        self.resource_definitions: MutableMapping[K8SResourceDefKey, K8SResourceDef] = {}
-        self.resource_paths: MutableMapping[K8SResourceDefKey, MutableMapping[str, dict]] = {}
+        self.validator = None
         self.resources: MutableMapping[K8SResourceKey, K8SResource] = {}
 
-        self.resource_definitions_schema = None
+    def _require_validator(self):
+        if self.validator is None:
+            raise RuntimeError(
+                "K8S validator not initialised; handle_start() must run first")
+        return self.validator
+
+    @property
+    def resource_definitions(self) -> MutableMapping[K8SResourceDefKey, K8SResourceDef]:
+        return self._require_validator().resource_definitions
+
+    @property
+    def resource_paths(self) -> MutableMapping[K8SResourceDefKey, MutableMapping[str, dict]]:
+        return self._require_validator().resource_paths
 
     def add_resources(self, manifests: Union[str, list, dict], source: Union[str, Path] = None):
         if not source:
@@ -683,12 +600,7 @@ class K8SResourcePluginMixin:
         return [self.add_crd(m, source or url) for m in manifests if m]
 
     def get_api_versions(self):
-        api_versions = set()
-        for rdef in self.resource_definitions:
-            api_version = f"{f'{rdef.group}/' if rdef.group else ''}{rdef.version}"
-            if api_version not in api_versions:
-                api_versions.add(api_version)
-        return sorted(api_versions)
+        return self.validator.api_versions()
 
     def _create_resource(self, manifest: dict, source: Union[str, Path] = None):
         resource_description = K8SResource.get_manifest_description(manifest, source)
@@ -741,92 +653,12 @@ class K8SResourcePluginMixin:
         yield from filter(func, self.resources.values())
 
     def _validate_resource(self, manifest: dict, source: Union[str, Path] = None):
-        for error in self._yield_manifest_rdef(manifest):
-            if isinstance(error, Exception):
-                yield error
-            else:
-                rdef = error
-                k8s_validator = K8SValidator(rdef.schema,
-                                             format_checker=k8s_format_checker)
-                yield from k8s_validator.iter_errors(manifest)
+        yield from self._require_validator().iter_manifest_errors(manifest)
 
     def _get_manifest_rdef(self, manifest):
-        for error in self._yield_manifest_rdef(manifest):
-            if isinstance(error, Exception):
-                raise error
-            else:
-                return error
-
-    def _yield_manifest_rdef(self, manifest):
-        error = None
-        for error in K8S_MINIMAL_RESOURCE_VALIDATOR.iter_errors(manifest):
-            yield error
-
-        if error:
-            return
-
-        key = K8SResourceDefKey(*to_group_and_version(manifest["apiVersion"]), manifest["kind"])
-
-        try:
-            yield self.resource_definitions[key]
-        except KeyError:
-            yield ValidationError("%s is not a defined Kubernetes resource" % (key,),
-                                  validator=K8S_MINIMAL_RESOURCE_VALIDATOR,
-                                  validator_value=key,
-                                  instance=manifest,
-                                  schema=K8S_MINIMAL_RESOURCE_SCHEMA)
+        return self._require_validator().get_manifest_rdef(manifest)
 
     def _add_crd(self, resource: K8SResource):
         for crd in K8SResourceDef.from_resource(resource):
             self.logger.info("Adding K8S CRD definition %s", crd.key)
             self.resource_definitions[crd.key] = crd
-
-    def _populate_resource_definitions(self):
-        k8s_def = self.resource_definitions_schema
-
-        def k8s_resource_def_key(v: Mapping[str, Union[list, Mapping]]) -> Iterable[K8SResourceDefKey]:
-            gvks = v.get("x-kubernetes-group-version-kind")
-            if gvks:
-                if isinstance(gvks, Mapping):
-                    gvk = gvks
-                    yield K8SResourceDefKey(gvk["group"],
-                                            gvk["version"],
-                                            gvk["kind"])
-                else:
-                    for gvk in gvks:
-                        yield K8SResourceDefKey(gvk["group"],
-                                                gvk["version"],
-                                                gvk["kind"])
-
-        paths = k8s_def["paths"]
-        for path, actions in paths.items():
-            path_rdk = None
-            path_actions = []
-            for action, action_details in actions.items():
-                if action == "parameters":
-                    continue
-                rdks = list(k8s_resource_def_key(action_details))
-                if rdks:
-                    assert len(rdks) == 1
-                    rdk = rdks[0]
-                    if path_rdk:
-                        if path_rdk != rdk:
-                            raise ValueError(f"Encountered path action x-kubernetes-group-version-kind conflict: "
-                                             f"{path}: {actions}")
-                        path_actions.append(action_details["x-kubernetes-action"])
-                    else:
-                        path_rdk = rdk
-
-            if path_rdk:
-                rdef_paths = self.resource_paths.get(path_rdk)
-                if not rdef_paths:
-                    rdef_paths = {}
-                    self.resource_paths[path_rdk] = rdef_paths
-                rdef_paths[path] = actions
-
-        for k, schema in k8s_def["definitions"].items():
-            # This short-circuits the resolution of the references to the top of the document
-            schema["definitions"] = k8s_def["definitions"]
-            for key in k8s_resource_def_key(schema):
-                for rdef in K8SResourceDef.from_manifest(key, schema, self.resource_paths):
-                    self.resource_definitions[key] = rdef
