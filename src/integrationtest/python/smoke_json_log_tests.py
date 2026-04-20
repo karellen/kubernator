@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 #   Copyright 2020 Express Systems USA, Inc
-#   Copyright 2023 Karellen, Inc.
+#   Copyright 2026 Karellen, Inc.
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -15,27 +15,35 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 #
+
 from test_support import IntegrationTestSupport, unittest
 
 unittest  # noqa
-# Above import must be first
 
 from pathlib import Path  # noqa: E402
-import shutil  # noqa: E402
-import sys  # noqa: E402
-import tarfile  # noqa: E402
 import tempfile  # noqa: E402
 
 
-class Issue27Test(IntegrationTestSupport):
-    def test_issue_27(self):
-        src_dir = Path(__file__).parent / "issue_27"
+class JsonLogSmokeTest(IntegrationTestSupport):
+    def test_json_log_format(self):
         with tempfile.TemporaryDirectory() as test_dir:
-            test_dir = Path(test_dir)
-            shutil.copytree(src_dir, test_dir, dirs_exist_ok=True)
-            with tarfile.open(test_dir / "git.tar.gz") as tarball:
-                tarball.extractall(test_dir, filter='data' if sys.version_info >= (3, 12) else None)
-            self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE")
+            log_file = str(Path(test_dir) / "log")
+            self.run_module_test("kubernator",
+                                 "--log-format", "json",
+                                 "--log-file", log_file,
+                                 "-v", "TRACE",
+                                 "-p", test_dir,
+                                 "dump")
+            logs = self.load_json_logs(log_file)
+            self.assertGreater(len(logs), 0)
+            first = logs[0]
+            self.assertIn("message", first)
+            self.assertIn("ts", first)
+            self.assertIn("name", first)
+            self.assertIn("level", first)
+            self.assertIn("fn", first)
+            self.assertIn("ln", first)
+            self.assertNotIn("time", first)
 
 
 if __name__ == "__main__":

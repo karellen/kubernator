@@ -36,7 +36,7 @@ def extract_merge_instructions(manifest, resource):
         change_path = change_instr.full_path.left
         if isinstance(change_path, Child) and isinstance(change_path.right, Index):
             list_of_maps = True
-            index = change_path.right.index
+            index = change_path.right.indices[0]
             change_path = change_path.left
             clean_manifest_result: list = change_path.find(normalized_manifest)[0].value
             search_key = context.copy()
