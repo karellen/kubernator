@@ -19,6 +19,7 @@
 import json
 import logging
 import os
+import sys
 import tarfile
 import tempfile
 from hashlib import sha256
@@ -135,7 +136,7 @@ class HelmPlugin(KubernatorPlugin):
 
             helm_file = str(Path(self.helm_dir.name) / "helm")
             helm_tar = tarfile.open(helm_file_dl)
-            helm_tar.extractall(self.helm_dir.name)
+            helm_tar.extractall(self.helm_dir.name, filter='data' if sys.version_info >= (3, 12) else None)
 
             copy(Path(self.helm_dir.name) / f"{get_golang_os()}-{get_golang_machine()}" / "helm", helm_file)
 

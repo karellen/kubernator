@@ -19,6 +19,7 @@
 import json
 import logging
 import os
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -90,7 +91,7 @@ class IstioPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
             istioctl_file = str(Path(self.istioctl_dir.name) / "istioctl")
             istio_tar = tarfile.open(istioctl_file_dl)
-            istio_tar.extractall(self.istioctl_dir.name)
+            istio_tar.extractall(self.istioctl_dir.name, filter='data' if sys.version_info >= (3, 12) else None)
 
             os.chmod(istioctl_file, 0o500)
             prepend_os_path(self.istioctl_dir.name)
