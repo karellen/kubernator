@@ -68,7 +68,7 @@ Key properties:
   making environment overlays and per-service customisation natural.
 - **Plugin pipeline.** Plugins are explicitly registered by the user (not auto-loaded) and run through well-defined
   stages: `init` → `start` → per-directory (`before_dir` → `before_script` → `.kubernator.py` → `after_script`
-  → `after_dir`) → `apply` → `summary`. Registration order is execution order.
+  → `after_dir`) → `apply` → `verify` → `cleanup` → `shutdown` → `summary`. Registration order is execution order.
 - **Hierarchical context.** A context object (`ktor`) follows directory traversal. Values set in `/a` are visible in
   `/a/b` and `/a/c/d`; values set in `/a/b` are invisible in `/a/c`. `ctx.globals` is always reachable.
 - **Composability.** `ktor.app.walk_local(...)` and `ktor.app.walk_remote(...)` let a script pull in further local or
@@ -88,7 +88,7 @@ $ docker run --mount type=bind,source="$(pwd)",target=/root,readonly -t ghcr.io/
 ```
 
 The image is tagged by version at `ghcr.io/karellen/kubernator:<version>` and `:latest` for the most recent non-dev
-release. Kubernetes client libraries for API versions 19–29 are pre-cached inside the image.
+release. Kubernetes client libraries for API versions 29–35 are pre-cached inside the image.
 
 ### MacOS
 
@@ -150,11 +150,11 @@ The pipeline stages, in order, are:
         2. The `.kubernator.py` script itself (executed with `ktor` and `logger` in globals).
         3. **After Script** — every plugin's `handle_after_script` (reverse order).
     3. **After Directory** — every plugin's `handle_after_dir` (reverse order).
-4. **Apply** — every plugin's `handle_apply` (e.g. Kubernetes plugin pushes resources to the cluster when `--yes`).
-5. **Verify** — every plugin's `handle_verify`.
-6. **Cleanup** — every plugin's `handle_cleanup` (runs after verify, so verify failures prevent cleanup).
-7. **Shutdown** — every plugin's `handle_shutdown` (cleanups, even on failure).
-8. **Summary** — every plugin's `handle_summary` (on success only).
+4. **Apply** — every plugin's `handle_apply` (reverse order; e.g. Kubernetes plugin pushes resources to the cluster when `--yes`).
+5. **Verify** — every plugin's `handle_verify` (reverse order).
+6. **Cleanup** — every plugin's `handle_cleanup` (reverse order; runs after verify, so verify failures prevent cleanup).
+7. **Shutdown** — every plugin's `handle_shutdown` (reverse order; always fires, even on failure).
+8. **Summary** — every plugin's `handle_summary` (reverse order; on success only).
 
 Within "for each directory", after `after_dir` fires, the app plugin scans the current directory for sub-directories,
 filters them through `context.app.excludes`, re-orders the survivors according to `context.app.includes` patterns, and
@@ -521,7 +521,7 @@ namespace: arc-systems
   namespace automatically.
 * `ktor.helm.check_chart_versions`
 * `ktor.helm.add_helm(chart, name, namespace, repository=None, version=None, values=None, values_file=None,
-  include_crds=False)` — programmatic equivalent of a `*.helm.yaml` file.
+  include_crds=True)` — programmatic equivalent of a `*.helm.yaml` file.
 * `ktor.helm.add_helm_template(template)` — add a release declaration as a dict.
 
 ### Istio Plugin (`istio`)
@@ -570,7 +570,7 @@ The Secret write is two-phase: before `apply` the new intent is recorded as `pen
 ### Templates Plugin (`templates`)
 
 Defines Jinja2 templates and renders them into Kubernetes resources. The plugin uses custom delimiters `{${ ... }$}`
-for expressions and `{%$ ... %}` for blocks so that templates remain valid-looking YAML.
+for expressions (block delimiters use the Jinja2 defaults `{% ... %}`) so that templates remain valid-looking YAML.
 
 Files ending `*.tmpl.yaml` / `*.tmpl.yml` are processed in two modes:
 
@@ -604,7 +604,7 @@ apply:
 ```
 
 Templates have access to the full context and to extra filters for JSON/YAML output (`to_json`, `to_yaml`,
-`to_yaml_str_block`, `to_json_yaml_str_block`).
+`to_yaml_str`, `to_yaml_str_block`, `to_json_yaml_str_block`).
 
 #### Context
 
