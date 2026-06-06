@@ -964,6 +964,7 @@ def install_python_k8s_client(run, package_major, logger, logger_stdout, logger_
                 continue
 
             dmp = diff_match_patch()
+            dmp.Match_Distance = 5000
             patches = dmp.patch_fromText(patch_text)
             target_file_patched, results = dmp.patch_apply(patches, target_file_original)
             failed_patch = False

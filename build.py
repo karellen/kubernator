@@ -50,7 +50,7 @@ default_task = ["analyze", "publish"]
 @init
 def set_properties(project):
     project.depends_on("gevent", ">=21.1.2")
-    project.depends_on("kubernetes", "~=35.0")
+    project.depends_on("kubernetes", "~=36.0")
     # kubernetes 35+ moved google-auth to an extra, but kube_config still imports it
     # unconditionally — declare it explicitly so older cached clients can load.
     project.depends_on("google-auth", ">=1.0.1")

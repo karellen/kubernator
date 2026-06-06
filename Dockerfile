@@ -7,7 +7,7 @@ WORKDIR /root
 
 RUN pip install --no-input /tmp/*.whl && \
     apt update && apt install git -y && \
-    kubernator --pre-cache-k8s-client $(seq 29 35) && \
+    kubernator --pre-cache-k8s-client $(seq 30 36) && \
     pip cache purge && \
     rm -rf /var/lib/{apt,dpkg,cache,log}/ && \
     rm -rf /tmp/*

@@ -16,7 +16,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io/karellen/kindest-node
-  KIND_FLOOR_MINOR: 29
+  KIND_FLOOR_MINOR: 30
 
 jobs:
   discover:

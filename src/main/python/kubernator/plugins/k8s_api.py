@@ -399,7 +399,7 @@ class K8SResource:
         if dry_run:
             kwargs["dry_run"] = "All"
 
-        def select_header_content_type_patch(content_types):
+        def select_header_content_type_patch(content_types, method=None, body=None):
             if patch_type == K8SResourcePatchType.JSON_PATCH:
                 return "application/json-patch+json"
             if patch_type == K8SResourcePatchType.SERVER_SIDE_PATCH:

@@ -88,7 +88,7 @@ $ docker run --mount type=bind,source="$(pwd)",target=/root,readonly -t ghcr.io/
 ```
 
 The image is tagged by version at `ghcr.io/karellen/kubernator:<version>` and `:latest` for the most recent non-dev
-release. Kubernetes client libraries for API versions 29–35 are pre-cached inside the image.
+release. Kubernetes client libraries for API versions 30–36 are pre-cached inside the image.
 
 ### MacOS
 
