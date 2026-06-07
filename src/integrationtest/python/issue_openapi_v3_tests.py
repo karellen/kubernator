@@ -36,7 +36,7 @@ class IssueOpenAPIV3Test(IntegrationTestSupport):
          should fail under v3.
 
     Runs only on the most recent supported Kubernetes version (>= 1.27
-    for v3 availability; the test matrix starts at 1.29). Setting
+    for v3 availability; the test matrix starts at 1.30). Setting
     ``OPENAPI_VERSION=v2`` in the environment lets CI verify v2
     continues to accept the CR unchanged — v2 built-in schemas don't
     carry CEL rules, and CRD schema validation is still applied by

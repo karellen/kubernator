@@ -1368,13 +1368,15 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
         return k8s_client
 
-    def _select_header_content_type_patch(self, content_types):
+    def _select_header_content_type_patch(self, content_types, method=None, body=None):
         """Returns `Content-Type` based on an array of content_types provided.
         :param content_types: List of content-types.
+        :param method: http method (e.g. POST, PATCH).
+        :param body: http body to send.
         :return: Content-Type (e.g. application/json).
         """
 
-        content_type = self.context.k8s.client._select_header_content_type(content_types)
+        content_type = self.context.k8s.client._select_header_content_type(content_types, method, body)
         if content_type == "application/merge-patch+json":
             return "application/json-patch+json"
         return content_type

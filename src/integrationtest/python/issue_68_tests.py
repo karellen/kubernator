@@ -34,7 +34,7 @@ class Issue68Test(IntegrationTestSupport):
         # Install
         os.environ["START_FRESH"] = "1"
         os.environ["KEEP_RUNNING"] = ""
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.31.14"
         os.environ["ISTIO_VERSION"] = "1.23.4"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
@@ -43,7 +43,7 @@ class Issue68Test(IntegrationTestSupport):
 
         os.environ["START_FRESH"] = "1"
         os.environ["KEEP_RUNNING"] = ""
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.31.14"
         os.environ["ISTIO_VERSION"] = "1.24.2"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
@@ -53,7 +53,7 @@ class Issue68Test(IntegrationTestSupport):
         # Install
         os.environ["START_FRESH"] = "1"
         os.environ["KEEP_RUNNING"] = "1"
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.31.14"
         os.environ["ISTIO_VERSION"] = "1.23.4"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
@@ -61,7 +61,7 @@ class Issue68Test(IntegrationTestSupport):
 
         os.environ["START_FRESH"] = ""
         os.environ["KEEP_RUNNING"] = ""
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.31.14"
         os.environ["ISTIO_VERSION"] = "1.24.2"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
@@ -71,7 +71,7 @@ class Issue68Test(IntegrationTestSupport):
         # Install
         os.environ["START_FRESH"] = "1"
         os.environ["KEEP_RUNNING"] = "1"
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.31.14"
         os.environ["ISTIO_VERSION"] = "1.23.0"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
@@ -79,7 +79,7 @@ class Issue68Test(IntegrationTestSupport):
 
         os.environ["START_FRESH"] = ""
         os.environ["KEEP_RUNNING"] = ""
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.31.14"
         os.environ["ISTIO_VERSION"] = "1.23.4"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
@@ -89,7 +89,7 @@ class Issue68Test(IntegrationTestSupport):
         # Install
         os.environ["START_FRESH"] = "1"
         os.environ["KEEP_RUNNING"] = "1"
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.31.14"
         os.environ["ISTIO_VERSION"] = "1.24.0"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
@@ -97,7 +97,7 @@ class Issue68Test(IntegrationTestSupport):
 
         os.environ["START_FRESH"] = ""
         os.environ["KEEP_RUNNING"] = ""
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.31.14"
         os.environ["ISTIO_VERSION"] = "1.24.2"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
@@ -108,7 +108,7 @@ class Issue68Test(IntegrationTestSupport):
         # Install
         os.environ["START_FRESH"] = "1"
         os.environ["KEEP_RUNNING"] = "1"
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.31.14"
         os.environ["ISTIO_VERSION"] = "1.24.2"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 
@@ -116,7 +116,7 @@ class Issue68Test(IntegrationTestSupport):
 
         os.environ["START_FRESH"] = ""
         os.environ["KEEP_RUNNING"] = ""
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.31.14"
         os.environ["ISTIO_VERSION"] = "1.23.4"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "apply", "--yes")
 

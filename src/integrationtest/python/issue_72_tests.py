@@ -31,7 +31,7 @@ class Issue72Test(IntegrationTestSupport):
 
         os.environ["START_FRESH"] = "1"
         os.environ["KEEP_RUNNING"] = ""
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.36.1"
         os.environ["HELM_VERSION"] = "3.17.3"
         self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "dump")
 
@@ -40,7 +40,7 @@ class Issue72Test(IntegrationTestSupport):
 
         os.environ["START_FRESH"] = "1"
         os.environ["KEEP_RUNNING"] = ""
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.36.1"
         os.environ["HELM_VERSION"] = "3.17.3"
         with self.assertRaises(AssertionError):
             self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "dump")
@@ -50,7 +50,7 @@ class Issue72Test(IntegrationTestSupport):
 
         os.environ["START_FRESH"] = "1"
         os.environ["KEEP_RUNNING"] = ""
-        os.environ["K8S_VERSION"] = "1.31.5"
+        os.environ["K8S_VERSION"] = "1.36.1"
         os.environ["HELM_VERSION"] = "3.17.3"
         with self.assertRaises(AssertionError):
             self.run_module_test("kubernator", "-p", str(test_dir), "-v", "TRACE", "dump")
