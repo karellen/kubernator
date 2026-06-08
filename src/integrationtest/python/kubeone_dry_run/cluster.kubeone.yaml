@@ -1,0 +1,17 @@
+apiVersion: kubeone.k8c.io/v1beta2
+kind: KubeOneCluster
+name: test-cluster
+versions:
+  kubernetes: "1.31.0"
+cloudProvider:
+  none: {}
+controlPlane:
+  hosts:
+    - publicAddress: 192.168.1.10
+      privateAddress: 192.168.1.10
+      sshUsername: admin
+      sshPort: 22
+    - publicAddress: 192.168.1.11
+      privateAddress: 192.168.1.11
+      sshUsername: admin
+      sshPort: 22
