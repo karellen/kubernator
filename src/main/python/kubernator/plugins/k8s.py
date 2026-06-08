@@ -1333,6 +1333,7 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
 
     def _filter_resource_patch(self, patch: Iterable[Mapping], excludes: Iterable[re.compile]):
         result = []
+        has_mutations = False
         for op in patch:
             if op["op"] != "test":
                 path = op["path"]
@@ -1344,7 +1345,10 @@ class KubernetesPlugin(KubernatorPlugin, K8SResourcePluginMixin):
                         break
                 if excluded:
                     continue
+                has_mutations = True
             result.append(op)
+        if not has_mutations:
+            return []
         return result
 
     def _setup_k8s_client(self):
